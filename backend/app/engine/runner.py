@@ -57,6 +57,7 @@ class Engine:
         self.current_open: dict[str, tuple[datetime, float]] = {}
         self.origin = "demo" if clock.simulated else "live"
         self.session = Session.from_settings(settings)
+        self._tracking = asyncio.Lock()  # the tracker loop and candle evaluation must not overlap
         self.started = time.time()
 
     # ------------------------------------------------------------------ bootstrap
@@ -247,6 +248,10 @@ class Engine:
             await self.clock.sleep(interval)
 
     async def track_once(self, until: datetime | None = None) -> None:
+        async with self._tracking:
+            await self._track(until)
+
+    async def _track(self, until: datetime | None) -> None:
         async with db.sessions()() as s:
             rows = await repo.open_signals(s)
         if not rows:
@@ -280,6 +285,8 @@ class Engine:
             row = await s.get(Signal, sig.id)
             if row is None or row.status != "ACTIVE":
                 return
+            if row.last_checked_at and st.last_checked_at and row.last_checked_at >= st.last_checked_at:
+                return  # another pass already advanced this signal from fresher state
             repo.store_progress(row, st)
             row.updated_at = utcnow()
             if st.closed:

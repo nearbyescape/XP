@@ -102,3 +102,49 @@ async def test_candle_loop_survives_a_database_outage(tmp_path):
         kinds = (await s.scalars(select(EngineEvent.kind))).all()
         alerts = (await s.scalars(select(TelegramOutbox).where(TelegramOutbox.kind == "alert"))).all()
     assert "candle.error" in kinds and "name resolution" in alerts[0].text
+
+
+async def test_overlapping_tracker_passes_notify_once(tmp_path):
+    """Candle evaluation and the tracker loop can call track_once at the same moment: every target
+    hit must still produce exactly one Telegram update."""
+    from datetime import datetime, timedelta, timezone
+
+    from app.market.base import Kline
+    from app.models import Signal
+
+    db.configure(f"sqlite+aiosqlite:///{tmp_path}/race.db")
+    await db.create_all()
+    t0 = datetime(2026, 10, 18, 4, tzinfo=timezone.utc)  # 09:30 AM IST
+
+    class Bars(FlakyMarket):
+        fine_interval = "15m"
+
+        async def klines_range(self, symbol, interval, start, end):
+            await asyncio.sleep(0.01)  # let the other pass interleave
+            return [Kline(t0 + timedelta(minutes=15 * i), t0 + timedelta(minutes=15 * (i + 1)),
+                          100.3, 101.2 if i == 1 else 100.4, 99.8 if i < 2 else 100.1, 100.3, 1.0) for i in range(3)]
+
+    settings = Settings(telegram_bot_token="TOKEN", telegram_channel_id="@signals", environment="test",
+                        universe="BTCUSDT")
+    client = TelegramClient("TOKEN", http=httpx.AsyncClient(transport=httpx.MockTransport(
+        lambda r: httpx.Response(200, json={"ok": True, "result": {"message_id": 1}}))))
+    clock = FastClock()
+    clock.now = lambda: t0 + timedelta(hours=1)
+    engine = Engine(settings, Bars(), clock, model=None, telegram=TelegramService(settings, clock, client))
+    async with db.sessions()() as s:
+        sig = Signal(uid="RSR-4H:BTCUSDT:x", origin="live", strategy="RSR-4H", symbol="BTCUSDT", side=1,
+                     signal_open_at=t0 - timedelta(hours=4), entry_at=t0, expires_at=t0 + timedelta(days=4),
+                     entry_price=100.0, take_profit=101.0, stop_loss=94.0, stop_current=94.0, breakeven=True,
+                     targets=[[101.0, 0.5], [102.0, 0.3], [103.0, 0.2]], fills=[], targets_hit=0, atr=2.0,
+                     tp_atr=0.5, sl_atr=3.0, max_bars=24, regime_coin=1, regime_btc=1, mode="live",
+                     published=True, status="ACTIVE", last_price=100.0)
+        s.add(sig)
+        s.add(TelegramOutbox(chat_id="@signals", kind="signal_new", signal_id=None, text="x", status="sent"))
+        await s.flush()
+        (await s.scalars(select(TelegramOutbox))).one().signal_id = sig.id
+        await s.commit()
+    await asyncio.gather(engine.track_once(), engine.track_once())
+    async with db.sessions()() as s:
+        updates = (await s.scalars(select(TelegramOutbox).where(TelegramOutbox.kind == "signal_update"))).all()
+        row = await s.get(Signal, sig.id)
+    assert row.targets_hit == 1 and len(updates) == 1
