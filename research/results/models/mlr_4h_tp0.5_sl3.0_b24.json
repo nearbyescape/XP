@@ -59,5 +59,18 @@
   "max_signals_per_candle": 5,
   "trained_through": "2026-10-12 12:00:00+00:00",
   "train_rows": 338556,
-  "retrain": "quarterly, expanding window, same recipe (meta_label.py --export)"
+  "retrain": "quarterly, expanding window, same recipe (meta_label.py --export)",
+  "symbols": [
+    "BTCUSDT",
+    "ETHUSDT",
+    "BNBUSDT",
+    "SOLUSDT",
+    "XRPUSDT",
+    "ADAUSDT",
+    "DOGEUSDT",
+    "AVAXUSDT",
+    "LINKUSDT",
+    "DOTUSDT"
+  ],
+  "version": "mlr-4h-2026-10-12"
 }

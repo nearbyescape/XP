@@ -234,6 +234,8 @@ def export_model(data, feats, args, tag, end):
     model.booster_.save_model(os.path.join(out, f"mlr_{tag}.txt"))
     meta = {
         "strategy": "MLR-4H", "timeframe": args.tf, "features": feats,
+        "symbols": SYMBOLS,  # symbol_id feature = index in this list; cross-sectional features use it
+        "version": f"mlr-{args.tf}-{tr.ts.max():%Y-%m-%d}",
         "tp_atr": args.tp, "sl_atr": args.sl, "max_bars": args.bars,
         "threshold": float(np.quantile(prob, 0.95)), "threshold_rule": "95th pct of last-365d in-sample probs",
         "max_signals_per_candle": 5, "trained_through": str(tr.ts.max()), "train_rows": int(len(tr)),

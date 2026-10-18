@@ -1,0 +1,277 @@
+"""Telegram delivery: outbox (persisted, retried, rate limited), bot commands, daily digest.
+
+Every message goes through the `telegram_outbox` table first, so a Telegram outage or an engine
+restart never loses a signal; delivery resumes where it stopped. Channel posts are paced to
+Telegram's ~20 messages/minute group limit; private chats to ~25 messages/second overall.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import time
+from datetime import timedelta
+
+from sqlalchemy import desc, func, select, update
+
+from .. import db
+from ..config import Settings
+from ..core import stats
+from ..engine.clock import Clock
+from ..models import Signal, TelegramOutbox, TelegramSubscriber, utcnow
+from ..services import repo
+from . import formatting as fmt
+from .client import TelegramClient, TelegramError
+
+log = logging.getLogger(__name__)
+
+MAX_ATTEMPTS = 6
+GROUP_GAP = 3.1      # seconds between messages to the same group/channel
+PRIVATE_GAP = 0.05   # seconds between messages to the same private chat
+GLOBAL_GAP = 0.04
+
+
+def is_group(chat_id: str) -> bool:
+    return chat_id.startswith(("-", "@"))
+
+
+class TelegramService:
+    def __init__(self, settings: Settings, clock: Clock, client: TelegramClient | None = None):
+        self.settings = settings
+        self.clock = clock
+        self.client = client
+        if self.client is None and settings.telegram_enabled:
+            self.client = TelegramClient(settings.telegram_bot_token.get_secret_value(),
+                                         settings.telegram_api_base)
+        self._last_sent: dict[str, float] = {}
+        self._last_global = 0.0
+        self.bot_username: str | None = None
+
+    @property
+    def enabled(self) -> bool:
+        return self.client is not None
+
+    # ---------------------------------------------------------------- enqueue (engine side)
+    async def _targets(self, s) -> list[str]:
+        chats = []
+        if self.settings.telegram_channel_id:
+            chats.append(self.settings.telegram_channel_id)
+        if self.settings.telegram_dm_enabled:
+            rows = await s.scalars(select(TelegramSubscriber.chat_id).where(TelegramSubscriber.active.is_(True)))
+            chats += [str(c) for c in rows.all()]
+        return chats
+
+    async def enqueue_signal_new(self, s, sig: Signal) -> None:
+        if not self.enabled or not sig.published:
+            return
+        text = fmt.new_signal(sig, self.settings.default_risk_pct)
+        kb = fmt.signal_keyboard(self.settings.public_base_url, sig.id)
+        for chat in await self._targets(s):
+            s.add(TelegramOutbox(chat_id=chat, kind="signal_new", signal_id=sig.id, text=text,
+                                 reply_markup=kb, next_attempt_at=utcnow()))
+
+    async def enqueue_signal_close(self, s, sig: Signal) -> None:
+        if not self.enabled or not sig.published:
+            return
+        # reply in every chat that received the original, plus edit the original there
+        chats = (await s.scalars(select(TelegramOutbox.chat_id).where(
+            TelegramOutbox.signal_id == sig.id, TelegramOutbox.kind == "signal_new",
+            TelegramOutbox.status.in_(["sent", "pending"])))).all()
+        kb = fmt.signal_keyboard(self.settings.public_base_url, sig.id)
+        for chat in dict.fromkeys(chats):
+            s.add(TelegramOutbox(chat_id=chat, kind="signal_edit", signal_id=sig.id,
+                                 text=fmt.edited_original(sig, self.settings.default_risk_pct),
+                                 reply_markup=kb, next_attempt_at=utcnow()))
+            s.add(TelegramOutbox(chat_id=chat, kind="signal_close", signal_id=sig.id,
+                                 text=fmt.close_signal(sig), next_attempt_at=utcnow()))
+
+    async def enqueue_notice(self, s, text: str, chat_id: str | None = None, kind: str = "notice") -> None:
+        if not self.enabled:
+            return
+        chat = chat_id or self.settings.telegram_channel_id
+        if chat:
+            s.add(TelegramOutbox(chat_id=chat, kind=kind, text=text, next_attempt_at=utcnow()))
+
+    # ---------------------------------------------------------------- sender
+    async def _pace(self, chat: str) -> None:
+        gap = GROUP_GAP if is_group(chat) else PRIVATE_GAP
+        wait = max(self._last_sent.get(chat, 0) + gap, self._last_global + GLOBAL_GAP) - time.monotonic()
+        if wait > 0:
+            await asyncio.sleep(wait)
+
+    async def _original_message_id(self, s, row: TelegramOutbox) -> int | None:
+        return await s.scalar(select(TelegramOutbox.message_id).where(
+            TelegramOutbox.signal_id == row.signal_id, TelegramOutbox.chat_id == row.chat_id,
+            TelegramOutbox.kind == "signal_new", TelegramOutbox.status == "sent"))
+
+    async def deliver(self, s, row: TelegramOutbox) -> None:
+        await self._pace(row.chat_id)
+        try:
+            if row.kind in ("signal_edit", "signal_close"):
+                original = await self._original_message_id(s, row)
+                if original is None:
+                    # the original is still queued: try again shortly (never reorder results first)
+                    pending = await s.scalar(select(func.count()).select_from(TelegramOutbox).where(
+                        TelegramOutbox.signal_id == row.signal_id, TelegramOutbox.chat_id == row.chat_id,
+                        TelegramOutbox.kind == "signal_new", TelegramOutbox.status == "pending"))
+                    if pending:
+                        row.next_attempt_at = utcnow() + timedelta(seconds=5)
+                        return
+                if row.kind == "signal_edit":
+                    if original is None:
+                        row.status, row.error = "skipped", "original not delivered"
+                        return
+                    try:
+                        await self.client.edit_message_text(row.chat_id, original, row.text, row.reply_markup)
+                    except TelegramError as exc:
+                        if not exc.not_modified:
+                            raise
+                    row.message_id = original
+                else:
+                    res = await self.client.send_message(row.chat_id, row.text, row.reply_markup, original)
+                    row.message_id = res["message_id"]
+            else:
+                res = await self.client.send_message(row.chat_id, row.text, row.reply_markup)
+                row.message_id = res["message_id"]
+            row.status, row.sent_at, row.error = "sent", utcnow(), None
+        except TelegramError as exc:
+            row.attempts += 1
+            row.error = str(exc)[:500]
+            if exc.blocked and not is_group(row.chat_id):
+                row.status = "failed"
+                await s.execute(update(TelegramSubscriber).where(
+                    TelegramSubscriber.chat_id == int(row.chat_id)).values(active=False, updated_at=utcnow()))
+            elif row.attempts >= MAX_ATTEMPTS or exc.code == 400:
+                row.status = "failed"
+                log.error("telegram delivery failed for outbox %s: %s", row.id, exc)
+            else:
+                backoff = exc.retry_after or min(300, 2 ** row.attempts * 5)
+                row.next_attempt_at = utcnow() + timedelta(seconds=backoff)
+        finally:
+            self._last_sent[row.chat_id] = time.monotonic()
+            self._last_global = time.monotonic()
+
+    async def sender_loop(self) -> None:
+        while True:
+            try:
+                async with db.sessions()() as s:
+                    rows = (await s.scalars(select(TelegramOutbox).where(
+                        TelegramOutbox.status == "pending", TelegramOutbox.next_attempt_at <= utcnow())
+                        .order_by(TelegramOutbox.id).limit(25))).all()
+                    for row in rows:
+                        await self.deliver(s, row)
+                        await s.commit()
+            except Exception:  # noqa: BLE001 - keep the loop alive, errors are logged
+                log.exception("telegram sender loop error")
+            await asyncio.sleep(1.0)
+
+    # ---------------------------------------------------------------- bot commands
+    async def handle_message(self, s, msg: dict) -> str | None:
+        chat = msg.get("chat", {})
+        text = (msg.get("text") or "").strip()
+        if chat.get("type") != "private" or not text.startswith("/"):
+            return None
+        cmd = text.split()[0].split("@")[0].lower()
+        chat_id = int(chat["id"])
+        sub = await s.get(TelegramSubscriber, chat_id)
+
+        async def set_active(active: bool):
+            nonlocal sub
+            if sub is None:
+                sub = TelegramSubscriber(chat_id=chat_id, username=chat.get("username"),
+                                         first_name=chat.get("first_name"), active=active)
+                s.add(sub)
+            else:
+                sub.active, sub.username = active, chat.get("username")
+            await s.commit()
+
+        if cmd == "/start":
+            await set_active(self.settings.telegram_dm_enabled)
+            return fmt.welcome(self.settings.app_name, self.settings.telegram_channel_url,
+                               self.settings.telegram_dm_enabled)
+        if cmd == "/subscribe":
+            if not self.settings.telegram_dm_enabled:
+                return "Private delivery is disabled. Follow the channel for signals."
+            await set_active(True)
+            return "✅ Subscribed. New signals and their results will arrive in this chat."
+        if cmd == "/unsubscribe":
+            await set_active(False)
+            return "Unsubscribed. Send /subscribe any time to resume."
+        if cmd == "/signals":
+            rows = [r for r in await repo.open_signals(s) if r.published]
+            return fmt.open_signals(rows)
+        if cmd == "/stats":
+            now = self.clock.now()
+            recent = await repo.closed_signals(s, since=now - timedelta(days=30))
+            every = await repo.closed_signals(s)
+            to_dict = lambda rows: [{"exit_at": r.exit_at, "pnl_net": r.pnl_net, "r_multiple": r.r_multiple,  # noqa: E731
+                                     "exit_reason": r.exit_reason} for r in rows]
+            return (fmt.kpi_block("Last 30 days", stats.kpis(to_dict(recent))) + "\n\n"
+                    + fmt.kpi_block("All time", stats.kpis(to_dict(every))))
+        if cmd == "/regime":
+            return fmt.regime(await repo.get_state(s, "regime", {}))
+        return fmt.HELP
+
+    async def updates_loop(self) -> None:
+        offset = None
+        try:
+            me = await self.client.get_me()
+            self.bot_username = me.get("username")
+            await self.client.set_my_commands(fmt.COMMANDS)
+            async with db.sessions()() as s:
+                await repo.set_state(s, "telegram", {"bot": self.bot_username, "ok": True, "at": utcnow().isoformat()})
+                await s.commit()
+        except TelegramError as exc:
+            log.error("telegram bot init failed: %s", exc)
+            async with db.sessions()() as s:
+                await repo.set_state(s, "telegram", {"bot": None, "ok": False, "error": str(exc),
+                                                     "at": utcnow().isoformat()})
+                await s.commit()
+        while True:
+            try:
+                updates = await self.client.get_updates(offset, timeout=25)
+                for u in updates:
+                    offset = u["update_id"] + 1
+                    msg = u.get("message")
+                    if not msg:
+                        continue
+                    async with db.sessions()() as s:
+                        reply = await self.handle_message(s, msg)
+                        if reply:
+                            s.add(TelegramOutbox(chat_id=str(msg["chat"]["id"]), kind="reply", text=reply,
+                                                 next_attempt_at=utcnow()))
+                            await s.commit()
+            except TelegramError as exc:
+                log.warning("telegram getUpdates failed: %s", exc)
+                await asyncio.sleep(exc.retry_after or 5)
+            except Exception:  # noqa: BLE001
+                log.exception("telegram updates loop error")
+                await asyncio.sleep(5)
+
+    # ---------------------------------------------------------------- daily digest
+    async def digest_loop(self) -> None:
+        while True:
+            now = self.clock.now()
+            nxt = (now + timedelta(days=1)).replace(hour=0, minute=5, second=0, microsecond=0)
+            await self.clock.sleep_until(nxt)
+            try:
+                async with db.sessions()() as s:
+                    day_end = self.clock.now().replace(hour=0, minute=0, second=0, microsecond=0)
+                    day_start = day_end - timedelta(days=1)
+                    closed = [r for r in await repo.closed_signals(s, since=day_start) if r.exit_at < day_end]
+                    recent = await repo.closed_signals(s, since=day_end - timedelta(days=30))
+                    k30 = stats.kpis([{"exit_at": r.exit_at, "pnl_net": r.pnl_net, "r_multiple": r.r_multiple,
+                                       "exit_reason": r.exit_reason} for r in recent])
+                    await self.enqueue_notice(s, fmt.digest(day_start, closed, k30), kind="digest")
+                    await s.commit()
+            except Exception:  # noqa: BLE001
+                log.exception("daily digest failed")
+
+    async def queue_health(self, s) -> dict:
+        pending = await s.scalar(select(func.count()).select_from(TelegramOutbox)
+                                 .where(TelegramOutbox.status == "pending"))
+        failed = await s.scalar(select(func.count()).select_from(TelegramOutbox)
+                                .where(TelegramOutbox.status == "failed"))
+        last = await s.scalar(select(TelegramOutbox.sent_at).where(TelegramOutbox.status == "sent")
+                              .order_by(desc(TelegramOutbox.sent_at)).limit(1))
+        return {"pending": pending, "failed": failed, "last_sent_at": last.isoformat() if last else None}

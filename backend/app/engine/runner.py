@@ -1,0 +1,331 @@
+"""The signal engine process.
+
+Loops (all asyncio, one process):
+  candles  - at every 4h close (+ delay): sync candles, evaluate A/B/C, open signals, notify
+  tracker  - every minute: walk open signals through closed 1m candles (TP / SL / time exits)
+  prices   - every 15 s: last prices for the dashboard
+  heartbeat- every 15 s: liveness for the API / admin console
+  telegram - outbox sender, bot commands (long polling), daily digest
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import time
+from datetime import datetime, timedelta
+
+import pandas as pd
+from sqlalchemy import select
+
+from .. import __version__, db
+from ..config import Settings
+from ..core.catalog import BAR_SECONDS, INTERVAL, STRATEGIES
+from ..core.evaluate import Candidate, evaluate_candle, regime_snapshot
+from ..core.lifecycle import Bar, Costs, TradeState, levels, pnl, step
+from ..core.ml import MLModel
+from ..market.base import MarketData, floor_time
+from ..models import Signal, utcnow
+from ..services import repo
+from ..telegram.service import TelegramService
+from .clock import Clock
+from .killswitch import review_strategy
+
+log = logging.getLogger(__name__)
+BAR = timedelta(seconds=BAR_SECONDS)
+
+
+class Engine:
+    def __init__(self, settings: Settings, market: MarketData, clock: Clock,
+                 model: MLModel | None, telegram: TelegramService | None = None):
+        self.settings = settings
+        self.market = market
+        self.clock = clock
+        self.model = model
+        self.telegram = telegram
+        self.costs = Costs(settings.cost_entry, settings.cost_tp, settings.cost_exit)
+        self.symbols = settings.symbols
+        needed = set(self.symbols) | {"BTCUSDT"} | (set(model.symbols) if model else set())
+        self.data_symbols = sorted(needed)
+        self.frames: dict[str, pd.DataFrame] = {}
+        self.current_open: dict[str, tuple[datetime, float]] = {}
+        self.origin = "demo" if clock.simulated else "live"
+        self.started = time.time()
+
+    # ------------------------------------------------------------------ bootstrap
+    async def bootstrap(self) -> None:
+        async with db.sessions()() as s:
+            await repo.ensure_strategy_states(s, {c: self.settings.modes.get(c, "live") for c in STRATEGIES})
+            last_eval = await repo.get_state(s, "last_eval", {})
+        if self.clock.simulated and last_eval.get("candle"):
+            resume = pd.Timestamp(last_eval["candle"]).to_pydatetime() + BAR
+            if resume > self.clock.now():
+                self.clock.jump_to(resume)  # demo restarted: continue where it stopped
+        async with db.sessions()() as s:
+            await repo.log_event(s, "info", "engine.start",
+                                 f"engine {__version__} started ({self.market.name}, origin={self.origin})",
+                                 {"symbols": self.symbols, "model": self.model.version if self.model else None})
+            await s.commit()
+        for sym in self.data_symbols:
+            await self.backfill(sym)
+        now = pd.Timestamp(self.clock.now())
+        async with db.sessions()() as s:
+            for sym in self.data_symbols:
+                f = await repo.load_frame(s, sym, INTERVAL)
+                # only candles that have closed by now (a demo clock may start before stored data ends)
+                self.frames[sym] = f[f.ts + pd.Timedelta(seconds=BAR_SECONDS) <= now].reset_index(drop=True)
+            await repo.set_state(s, "regime", regime_snapshot({k: self.frames[k] for k in self.symbols
+                                                               if k in self.frames}))
+            await s.commit()
+        log.info("bootstrap complete: %s", {k: len(v) for k, v in self.frames.items()})
+
+    async def backfill(self, sym: str) -> None:
+        now = self.clock.now()
+        async with db.sessions()() as s:
+            last = await repo.latest_candle_time(s, sym, INTERVAL)
+        start = (last - BAR) if last else self.settings.backfill_from
+        klines = await self.market.klines_range(sym, INTERVAL, start, now)
+        closed = [k for k in klines if k.is_closed(now)]
+        async with db.sessions()() as s:
+            n = await repo.upsert_candles(s, sym, INTERVAL, closed)
+            await s.commit()
+        log.info("backfill %s: %d candles from %s", sym, n, start.date())
+
+    # ------------------------------------------------------------------ candles
+    async def sync_candles(self, since: datetime) -> None:
+        now = self.clock.now()
+        for sym in self.data_symbols:
+            try:
+                kl = await self.market.klines(sym, INTERVAL, start=since, limit=50)
+            except Exception as exc:  # noqa: BLE001 - one coin failing must not stop the others
+                log.error("candle sync failed for %s: %s", sym, exc)
+                continue
+            closed = [k for k in kl if k.is_closed(now)]
+            for k in kl:
+                if not k.is_closed(now):
+                    self.current_open[sym] = (k.open_time, k.open)
+            if not closed:
+                continue
+            async with db.sessions()() as s:
+                await repo.upsert_candles(s, sym, INTERVAL, closed)
+                await s.commit()
+            new = pd.DataFrame([{"ts": k.open_time, **{c: getattr(k, c) for c in repo.CANDLE_COLS}}
+                                for k in closed])
+            new["ts"] = pd.to_datetime(new["ts"], utc=True)
+            old = self.frames.get(sym, pd.DataFrame(columns=new.columns))
+            frame = pd.concat([old[old.ts < new.ts.min()], new], ignore_index=True) if len(old) else new
+            self.frames[sym] = frame.drop_duplicates("ts", keep="last").sort_values("ts").reset_index(drop=True)
+
+    async def candle_loop(self) -> None:
+        while True:
+            now = self.clock.now()
+            current = floor_time(now, INTERVAL)
+            target = current - BAR  # the most recently closed candle
+            async with db.sessions()() as s:
+                last_eval = await repo.get_state(s, "last_eval", {})
+            last_t = pd.Timestamp(last_eval["candle"]) if last_eval.get("candle") else None
+            if last_t is None or last_t < pd.Timestamp(target):
+                lag = now - current
+                # a simulated clock keeps running while we compute, so latency only matters live
+                if self.clock.simulated or lag <= timedelta(minutes=self.settings.max_signal_latency_minutes):
+                    await self.safe(self.process_candle(pd.Timestamp(target)), "candle")
+                else:
+                    await self.event("warning", "candle.skipped",
+                                     f"skipped evaluation of {target:%Y-%m-%d %H:%M} (engine was {lag} late)")
+                    await self.set_last_eval(pd.Timestamp(target), skipped=True)
+            await self.clock.sleep_until(current + BAR + timedelta(seconds=self.settings.eval_delay_seconds))
+
+    async def process_candle(self, t: pd.Timestamp) -> None:
+        started = time.monotonic()
+        for attempt in range(4):
+            await self.sync_candles(t.to_pydatetime() - 2 * BAR)
+            missing = [s for s in self.data_symbols
+                       if s not in self.frames or self.frames[s].empty or self.frames[s].ts.iloc[-1] != t]
+            if not missing:
+                break
+            log.warning("candle %s missing for %s (attempt %d)", t, missing, attempt + 1)
+            await self.clock.sleep(10)
+        # exits inside the candle that just closed must free their coin before we evaluate it
+        await self.track_once()
+        async with db.sessions()() as s:
+            states = await repo.strategy_states(s)
+            open_rows = await repo.open_signals(s)
+        enabled = {c for c, st in states.items() if st.mode != "off"}
+        open_positions = {(r.strategy, r.symbol) for r in open_rows}
+        frames = {k: v for k, v in self.frames.items() if not v.empty and v.ts.iloc[-1] <= t}
+        cands = await asyncio.to_thread(evaluate_candle, frames, t, self.symbols, open_positions,
+                                        enabled, self.model)
+        created = []
+        for c in cands:
+            sig = await self.open_signal(c, states[c.strategy])
+            if sig:
+                created.append(sig)
+        async with db.sessions()() as s:
+            await repo.set_state(s, "regime", regime_snapshot({k: frames[k] for k in self.symbols if k in frames}))
+            await s.commit()
+        await self.set_last_eval(t, signals=len(created), seconds=round(time.monotonic() - started, 2))
+        await self.event("info", "candle.evaluated",
+                         f"{t:%Y-%m-%d %H:%M} evaluated: {len(created)} new signal(s)",
+                         {"signals": [s.uid for s in created]})
+
+    async def open_signal(self, c: Candidate, state) -> Signal | None:
+        entry_at = (c.signal_open + pd.Timedelta(seconds=BAR_SECONDS)).to_pydatetime()
+        cur = self.current_open.get(c.symbol)
+        if not cur or cur[0] != entry_at:
+            kl = await self.market.klines(c.symbol, INTERVAL, start=entry_at, limit=1)
+            if not kl or kl[0].open_time != entry_at:
+                log.error("no entry candle for %s %s", c.strategy, c.symbol)
+                return None
+            cur = (kl[0].open_time, kl[0].open)
+        entry = float(cur[1])
+        tp, sl = levels(c.side, entry, c.atr, c.tp_atr, c.sl_atr)
+        published = state.mode == "live" and not state.auto_paused
+        uid = f"{c.strategy}:{c.symbol}:{c.signal_open:%Y-%m-%dT%H:%MZ}"
+        async with db.sessions()() as s:
+            if await s.scalar(select(Signal.id).where(Signal.uid == uid)):
+                return None  # idempotent: already created (restart during the same candle)
+            sig = Signal(
+                uid=uid, origin=self.origin, strategy=c.strategy, symbol=c.symbol, side=c.side,
+                signal_open_at=c.signal_open.to_pydatetime(), entry_at=entry_at,
+                expires_at=entry_at + BAR * c.max_bars, entry_price=entry, take_profit=tp, stop_loss=sl,
+                atr=c.atr, tp_atr=c.tp_atr, sl_atr=c.sl_atr, max_bars=c.max_bars,
+                regime_coin=c.regime_coin, regime_btc=c.regime_btc, model_prob=c.model_prob,
+                model_version=self.model.version if (c.model_prob is not None and self.model) else None,
+                mode="live" if published else ("shadow" if state.mode != "live" else "paused"),
+                published=published, status="ACTIVE", last_price=entry, mfe=0.0, mae=0.0,
+            )
+            s.add(sig)
+            await s.flush()
+            if self.telegram:
+                await self.telegram.enqueue_signal_new(s, sig)
+            await repo.log_event(s, "info", "signal.new",
+                                 f"{c.strategy} {'LONG' if c.side == 1 else 'SHORT'} {c.symbol} @ {entry:g}"
+                                 + ("" if published else f" ({sig.mode}, not published)"),
+                                 {"signal_id": sig.id, "prob": c.model_prob})
+            await s.commit()
+            return sig
+
+    # ------------------------------------------------------------------ tracker
+    async def tracker_loop(self) -> None:
+        interval = self.settings.tracker_interval_seconds
+        if self.clock.simulated:
+            interval = max(interval, 900)  # replay tracks on 15m candles
+        while True:
+            await self.safe(self.track_once(), "tracker")
+            await self.clock.sleep(interval)
+
+    async def track_once(self) -> None:
+        async with db.sessions()() as s:
+            rows = await repo.open_signals(s)
+        if not rows:
+            return
+        now = self.clock.now()
+        fine = self.market.fine_interval
+        by_symbol: dict[str, list[Signal]] = {}
+        for r in rows:
+            by_symbol.setdefault(r.symbol, []).append(r)
+        for sym, sigs in by_symbol.items():
+            since = min((r.last_checked_at or r.entry_at) for r in sigs)
+            try:
+                bars = [k for k in await self.market.klines_range(sym, fine, floor_time(since, fine), now)
+                        if k.is_closed(now)]
+            except Exception as exc:  # noqa: BLE001
+                log.error("tracker: %s %s candles failed: %s", sym, fine, exc)
+                continue
+            for sig in sigs:
+                await self.advance(sig, [Bar(k.open_time, k.close_time, k.open, k.high, k.low, k.close)
+                                         for k in bars])
+
+    async def advance(self, sig: Signal, bars: list[Bar]) -> None:
+        st = TradeState(sig.side, sig.entry_price, sig.take_profit, sig.stop_loss, sig.entry_at,
+                        sig.expires_at, sig.last_checked_at, sig.mfe or 0.0, sig.mae or 0.0, sig.last_price)
+        for b in bars:
+            if step(st, b):
+                break
+        if st.last_checked_at == sig.last_checked_at and not st.closed:
+            return
+        async with db.sessions()() as s:
+            row = await s.get(Signal, sig.id)
+            if row is None or row.status != "ACTIVE":
+                return
+            row.last_checked_at, row.mfe, row.mae, row.last_price = st.last_checked_at, st.mfe, st.mae, st.last_price
+            row.updated_at = utcnow()
+            if st.closed:
+                res = pnl(st, self.costs)
+                row.status, row.exit_reason = "CLOSED", st.exit_reason
+                row.exit_price, row.exit_at = st.exit_price, st.exit_at
+                row.pnl_gross, row.pnl_net, row.r_multiple = res["gross"], res["net"], res["r"]
+                await repo.log_event(s, "info", "signal.closed",
+                                     f"{row.strategy} {row.symbol} {st.exit_reason} net {res['net'] * 100:+.2f}% "
+                                     f"({res['r']:+.2f}R)", {"signal_id": row.id})
+                if self.telegram:
+                    await self.telegram.enqueue_signal_close(s, row)
+                await s.commit()
+                await review_strategy(s, row.strategy, self.settings, self.telegram, self.clock.now())
+                await s.commit()
+            else:
+                await s.commit()
+
+    # ------------------------------------------------------------------ prices / heartbeat
+    async def price_loop(self) -> None:
+        interval = self.settings.price_interval_seconds if not self.clock.simulated else 900
+        while True:
+            try:
+                prices = await self.market.prices(self.symbols)
+                async with db.sessions()() as s:
+                    await repo.set_state(s, "prices", {"at": self.clock.now().isoformat(), "prices": prices})
+                    await s.commit()
+            except Exception as exc:  # noqa: BLE001
+                log.warning("price refresh failed: %s", exc)
+            await self.clock.sleep(interval)
+
+    async def heartbeat_loop(self) -> None:
+        while True:
+            try:
+                async with db.sessions()() as s:
+                    tg = await self.telegram.queue_health(s) if self.telegram else None
+                    await repo.set_state(s, "heartbeat", {
+                        "at": utcnow().isoformat(), "clock": self.clock.now().isoformat(),
+                        "simulated": self.clock.simulated, "source": self.market.name,
+                        "fine_interval": self.market.fine_interval, "version": __version__,
+                        "model": self.model.version if self.model else None,
+                        "model_threshold": self.model.threshold if self.model else None,
+                        "uptime_s": int(time.time() - self.started), "telegram_queue": tg,
+                        "telegram_enabled": bool(self.telegram and self.telegram.enabled),
+                        "candles": {k: str(v.ts.iloc[-1]) for k, v in self.frames.items() if len(v)},
+                    })
+                    await s.commit()
+            except Exception:  # noqa: BLE001
+                log.exception("heartbeat failed")
+            await asyncio.sleep(15)
+
+    # ------------------------------------------------------------------ helpers
+    async def set_last_eval(self, t: pd.Timestamp, **extra) -> None:
+        async with db.sessions()() as s:
+            await repo.set_state(s, "last_eval", {"candle": t.isoformat(), "at": utcnow().isoformat(), **extra})
+            await s.commit()
+
+    async def event(self, level: str, kind: str, message: str, data: dict | None = None) -> None:
+        log.log({"warning": logging.WARNING, "error": logging.ERROR}.get(level, logging.INFO), message)
+        async with db.sessions()() as s:
+            await repo.log_event(s, level, kind, message, data)
+            await s.commit()
+
+    async def safe(self, coro, name: str) -> None:
+        try:
+            await coro
+        except Exception as exc:  # noqa: BLE001 - loops must survive; the failure is recorded
+            log.exception("%s loop error", name)
+            try:
+                await self.event("error", f"{name}.error", f"{name}: {exc.__class__.__name__}: {exc}")
+            except Exception:  # noqa: BLE001
+                pass
+
+    async def run(self) -> None:
+        await self.bootstrap()
+        tasks = [self.candle_loop(), self.tracker_loop(), self.price_loop(), self.heartbeat_loop()]
+        if self.telegram and self.telegram.enabled:
+            tasks += [self.telegram.sender_loop(), self.telegram.updates_loop()]
+            if self.settings.telegram_daily_digest:
+                tasks.append(self.telegram.digest_loop())
+        await asyncio.gather(*tasks)

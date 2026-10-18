@@ -10,3 +10,11 @@ __pycache__/
 *.pyc
 .ipynb_checkpoints/
 .DS_Store
+
+# app
+node_modules/
+frontend/dist/
+.env
+*.db
+.pytest_cache/
+.ruff_cache/

@@ -1,0 +1,10 @@
+line-length = 120
+target-version = "py312"
+
+[lint]
+select = ["E", "F", "W", "B", "UP"]
+# l/h/o/c are the conventional OHLC names in indicator code
+ignore = ["E741", "B008", "UP017"]
+
+[lint.per-file-ignores]
+"migrations/*" = ["E501", "UP", "W291", "F401"]
