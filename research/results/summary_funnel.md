@@ -1,0 +1,22 @@
+| timeframe   | cost_model   | strategy                    |   configs |   is_wr80_configs |   is_qualified |   oos_survivors |   median_oos_expectancy_pct |   best_is_oos_wr |   best_is_oos_pf |
+|:------------|:-------------|:----------------------------|----------:|------------------:|---------------:|----------------:|----------------------------:|-----------------:|-----------------:|
+| 1h          | taker        | S1_trend_pullback_rsi       |       684 |               142 |              1 |               0 |                      -0.141 |            0.776 |            0.726 |
+| 1h          | taker        | S2_bollinger_snapback       |       864 |               115 |              5 |               0 |                      -0.191 |            0.796 |            0.749 |
+| 1h          | taker        | S3_capitulation_reversal    |      1152 |               183 |              0 |               0 |                      -0.257 |          nan     |          nan     |
+| 1h          | taker        | S4_btc_relative_dislocation |      1296 |               187 |              0 |               0 |                      -0.232 |          nan     |          nan     |
+| 1h          | taker        | S5_trend_continuation_tp1   |        96 |                 0 |              0 |               0 |                      -0.404 |          nan     |          nan     |
+| 1h          | taker        | S6_vwap_stretch             |       768 |               184 |              0 |               0 |                      -0.187 |          nan     |          nan     |
+| 4h          | taker        | S1_trend_pullback_rsi       |       684 |               127 |             46 |               0 |                      -0.104 |            0.836 |            1.027 |
+| 4h          | taker        | S2_bollinger_snapback       |       864 |               141 |             30 |               0 |                      -0.234 |            0.79  |            0.701 |
+| 4h          | taker        | S3_capitulation_reversal    |      1152 |               292 |              0 |               0 |                      -0.306 |          nan     |          nan     |
+| 4h          | taker        | S4_btc_relative_dislocation |      1296 |               183 |              4 |               0 |                      -0.179 |            0.826 |            0.785 |
+| 4h          | taker        | S5_trend_continuation_tp1   |        96 |                20 |              0 |               0 |                      -0.533 |          nan     |          nan     |
+| 4h          | taker        | S6_vwap_stretch             |       768 |               157 |             66 |               0 |                      -0.275 |            0.734 |            0.835 |
+| 4h          | pro          | S1_trend_pullback_rsi       |       684 |               127 |             48 |               2 |                      -0.08  |            0.836 |            1.057 |
+| 4h          | pro          | S2_bollinger_snapback       |       864 |               141 |             32 |               0 |                      -0.202 |            0.79  |            0.735 |
+| 4h          | pro          | S6_vwap_stretch             |       768 |               157 |             72 |               0 |                      -0.249 |            0.734 |            0.858 |
+| 4h          | pro          | S7_keltner_wick_catcher     |      2112 |                20 |              0 |               0 |                      -0.33  |          nan     |          nan     |
+| 4h          | pro          | S8_rsi_extreme_limit        |      1152 |                24 |              0 |               0 |                      -0.197 |          nan     |          nan     |
+| 4h          | pro          | S1s_trend_pullback_sides    |       972 |               412 |            170 |              24 |                      -0.02  |            0.889 |            1.098 |
+| 4h          | pro          | S9_regime_gated_pullback    |      1458 |               624 |            352 |              77 |                       0.048 |            0.856 |            0.977 |
+| 4h          | pro          | S10_liquidity_sweep         |      1728 |               292 |             11 |               8 |                      -0.086 |            0.75  |            1.085 |

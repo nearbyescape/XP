@@ -1,0 +1,12 @@
+# Research market data (re-downloadable, ~200 MB)
+research/data/raw/
+research/data/parquet/
+
+# Full parameter grids are large; regenerate with research/run_research.py
+research/results/grid_*.csv
+research/results/log_*.txt
+
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.DS_Store
