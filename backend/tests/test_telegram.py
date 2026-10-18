@@ -263,10 +263,11 @@ async def test_updates_outside_the_session_are_silent(service, monkeypatch):
         await s.commit()
     await drain(svc)
     fake.calls.clear()
-    svc.clock = FixedClock(datetime(2026, 10, 18, 20, 0, tzinfo=timezone.utc))  # 01:30 AM IST
+    night = datetime(2026, 10, 18, 20, 0, tzinfo=timezone.utc)  # 01:30 AM IST
+    svc.clock = FixedClock(night.replace(hour=23))  # processed later still counts as a night-time event
     async with db.sessions()() as s:
         row = await s.get(Signal, sig.id)
-        row.status, row.exit_reason, row.exit_price, row.exit_at = "CLOSED", "SL", 131.80, svc.clock.now()
+        row.status, row.exit_reason, row.exit_price, row.exit_at = "CLOSED", "SL", 131.80, night
         row.pnl_net, row.r_multiple = -0.0745, -1.01
         await svc.enqueue_signal_close(s, row)
         await s.commit()

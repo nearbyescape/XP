@@ -51,9 +51,10 @@ class TelegramService:
         self.bot_username: str | None = None
         self.style = fmt.Style.from_settings(settings)
 
-    def _quiet(self) -> bool:
-        """Updates outside the publishing session arrive without sound."""
-        return self.settings.overnight_updates == "silent" and not self.style.session.contains(self.clock.now())
+    def _quiet(self, at: datetime) -> bool:
+        """Updates for events outside the publishing session arrive without sound. Judged by when the
+        event happened, so an update processed a little late keeps its daytime / night-time status."""
+        return self.settings.overnight_updates == "silent" and not self.style.session.contains(at)
 
     @property
     def enabled(self) -> bool:
@@ -78,7 +79,7 @@ class TelegramService:
             s.add(TelegramOutbox(chat_id=chat, kind="signal_new", signal_id=sig.id, text=text,
                                  reply_markup=kb, next_attempt_at=utcnow()))
 
-    async def _follow_up(self, s, sig: Signal, kind: str, text: str) -> None:
+    async def _follow_up(self, s, sig: Signal, kind: str, text: str, at: datetime) -> None:
         """Reply in every chat that received the original signal, and edit the original there."""
         if not self.enabled or not sig.published:
             return
@@ -86,7 +87,7 @@ class TelegramService:
             TelegramOutbox.signal_id == sig.id, TelegramOutbox.kind == "signal_new",
             TelegramOutbox.status.in_(["sent", "pending"])))).all()
         kb = fmt.signal_keyboard(self.settings.public_base_url, sig.id)
-        silent = self._quiet()
+        silent = self._quiet(at)
         for chat in dict.fromkeys(chats):
             s.add(TelegramOutbox(chat_id=chat, kind="signal_edit", signal_id=sig.id,
                                  text=fmt.edited_original(sig, self.style),
@@ -96,10 +97,12 @@ class TelegramService:
 
     async def enqueue_signal_update(self, s, sig: Signal, hit_before: int) -> None:
         """TP1 / TP2 filled while part of the position is still open."""
-        await self._follow_up(s, sig, "signal_update", fmt.target_update(sig, hit_before))
+        at = datetime.fromisoformat(sig.fills[-1][0]) if sig.fills else self.clock.now()
+        await self._follow_up(s, sig, "signal_update", fmt.target_update(sig, hit_before), at)
 
     async def enqueue_signal_close(self, s, sig: Signal, hit_before: int | None = None) -> None:
-        await self._follow_up(s, sig, "signal_close", fmt.close_signal(sig, hit_before))
+        await self._follow_up(s, sig, "signal_close", fmt.close_signal(sig, hit_before),
+                              sig.exit_at or self.clock.now())
 
     async def enqueue_notice(self, s, text: str, chat_id: str | None = None, kind: str = "notice") -> None:
         if not self.enabled:
