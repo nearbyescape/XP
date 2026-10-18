@@ -1,7 +1,7 @@
 // Mirrors backend/app/api/serialize.py and backend/app/api/public.py
 
 export type Side = "LONG" | "SHORT";
-export type ExitReason = "TP" | "SL" | "TIME";
+export type ExitReason = "TP" | "SL" | "BE" | "TIME";
 export type Mode = "live" | "shadow" | "off";
 
 export interface Benchmark {
@@ -15,6 +15,9 @@ export interface Benchmark {
   avg_loss_pct: number;
   cagr_at_half_pct_risk?: number;
   max_dd_at_half_pct_risk?: number;
+  tp1_rate?: number; // fraction of signals reaching TP1 / TP2 / TP3
+  tp2_rate?: number;
+  tp3_rate?: number;
 }
 
 export interface StrategyMeta {
@@ -27,6 +30,9 @@ export interface StrategyMeta {
   tp_atr: number;
   sl_atr: number;
   max_bars: number;
+  targets_atr: number[];
+  target_sizes: number[]; // fractions, TP1 first
+  breakeven: boolean;
   benchmark: Benchmark;
   mode: Mode | null;
   auto_paused: boolean;
@@ -54,6 +60,15 @@ export interface Meta {
   engine: { alive: boolean; heartbeat_age_s: number | null };
 }
 
+export interface Target {
+  n: number;
+  price: number;
+  size_pct: number; // share of the position closed at this target
+  pct: number; // distance from entry, percent
+  hit_at: string | null;
+  fill_price: number | null;
+}
+
 export interface Signal {
   id: number;
   uid: string;
@@ -69,8 +84,15 @@ export interface Signal {
   entry_at: string;
   expires_at: string;
   entry_price: number;
-  take_profit: number;
-  stop_loss: number;
+  take_profit: number; // TP1
+  stop_loss: number; // planned stop
+  stop_current: number; // stop in force (entry once TP1 is hit)
+  breakeven: boolean;
+  targets: Target[];
+  targets_hit: number;
+  tp1_at: string | null;
+  take_profit_2: number | null;
+  take_profit_3: number | null;
   atr: number;
   tp_atr: number;
   sl_atr: number;
@@ -118,6 +140,9 @@ export interface Kpis {
   max_consecutive_losses: number;
   signals_per_day: number | null;
   by_reason: Partial<Record<ExitReason, number>>;
+  tp1_rate: number | null; // percent of signals reaching each target
+  tp2_rate: number | null;
+  tp3_rate: number | null;
 }
 
 export interface Stats {

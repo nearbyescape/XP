@@ -57,7 +57,8 @@ async def meta(s: AsyncSession = Depends(get_session), settings: Settings = Depe
         strategies.append({
             "code": code, "letter": spec.letter, "name": spec.name, "kind": spec.kind,
             "summary": spec.summary, "rules": spec.rules, "tp_atr": spec.tp_atr, "sl_atr": spec.sl_atr,
-            "max_bars": spec.max_bars, "benchmark": spec.benchmark,
+            "max_bars": spec.max_bars, "targets_atr": list(spec.targets_atr),
+            "target_sizes": list(spec.target_sizes), "breakeven": spec.breakeven, "benchmark": spec.benchmark,
             "mode": st.mode if st else None, "auto_paused": bool(st and st.auto_paused),
             "pause_reason": st.pause_reason if st else None,
         })
@@ -105,7 +106,7 @@ def signal_query(status: str, strategy: str | None, symbol: str | None, side: st
 @router.get("/signals")
 async def list_signals(status: Literal["active", "closed", "all"] = "all", strategy: str | None = None,
                        symbol: str | None = None, side: Literal["long", "short"] | None = None,
-                       outcome: Literal["TP", "SL", "TIME"] | None = None, origin: Origin = "default",
+                       outcome: Literal["TP", "SL", "BE", "TIME"] | None = None, origin: Origin = "default",
                        since: datetime | None = None, until: datetime | None = None,
                        limit: int = Query(50, ge=1, le=500), offset: int = Query(0, ge=0),
                        s: AsyncSession = Depends(get_session)):
@@ -120,7 +121,7 @@ async def list_signals(status: Literal["active", "closed", "all"] = "all", strat
 @router.get("/signals.csv")
 async def export_signals(status: Literal["active", "closed", "all"] = "all", strategy: str | None = None,
                          symbol: str | None = None, side: Literal["long", "short"] | None = None,
-                         outcome: Literal["TP", "SL", "TIME"] | None = None, origin: Origin = "default",
+                         outcome: Literal["TP", "SL", "BE", "TIME"] | None = None, origin: Origin = "default",
                          since: datetime | None = None, until: datetime | None = None,
                          s: AsyncSession = Depends(get_session)):
     where = signal_query(status, strategy, symbol, side, outcome, origin, since, until)
@@ -153,7 +154,7 @@ async def closed_rows(s: AsyncSession, strategy: str | None, origin: str, since:
     if since:
         conds.append(Signal.exit_at >= since)
     rows = (await s.execute(select(Signal.strategy, Signal.exit_at, Signal.entry_at, Signal.pnl_net,
-                                   Signal.r_multiple, Signal.exit_reason).where(and_(*conds))
+                                   Signal.r_multiple, Signal.exit_reason, Signal.targets_hit).where(and_(*conds))
                             .order_by(Signal.exit_at))).all()
     return [r._asdict() for r in rows]
 

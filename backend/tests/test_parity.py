@@ -58,7 +58,7 @@ def test_replay_reproduces_research_trades(frames, spec, csv):
     ref = pd.read_csv(RESEARCH / "results" / "candidates" / csv, parse_dates=["entry_time", "exit_time"])
     start, end = pd.Timestamp("2021-12-20", tz="UTC"), pd.Timestamp("2026-10-17", tz="UTC")
     ref = ref[(ref.entry_time >= "2022-01-01") & (ref.reason != "eod")]
-    trades = replay(frames, SYMBOLS, {spec.code}, None, start, end, Costs())
+    trades = replay(frames, SYMBOLS, {spec.code}, None, start, end, Costs(), multi_target=False)
     got = pd.DataFrame([{
         "symbol": t.candidate.symbol, "entry_time": t.state.entry_at, "side": t.state.side,
         "reason": t.state.exit_reason.lower(), "pnl": t.result["net"]}
@@ -69,6 +69,25 @@ def test_replay_reproduces_research_trades(frames, spec, csv):
     assert (m._merge == "both").mean() > 0.995, m[m._merge != "both"].head(10)
     assert (both.reason_ref == both.reason_got).mean() > 0.995
     np.testing.assert_allclose(both.pnl_got, both.pnl_ref, atol=1e-9)
+
+
+@pytest.mark.parametrize("spec", [RGP, RSR])
+def test_targets_keep_the_validated_signals_and_tp1_outcomes(frames, spec):
+    """TP2/TP3 must not change which signals are published (the coin is free once TP1 fills) nor the
+    TP1-or-stop outcome; a signal that reaches TP1 can no longer end negative."""
+    start, end = pd.Timestamp("2021-12-20", tz="UTC"), pd.Timestamp("2026-10-17", tz="UTC")
+    key = lambda t: (t.candidate.symbol, t.state.entry_at, t.state.side)  # noqa: E731
+    single = {key(t): t for t in replay(frames, SYMBOLS, {spec.code}, None, start, end, multi_target=False)}
+    multi = {key(t): t for t in replay(frames, SYMBOLS, {spec.code}, None, start, end)}
+    assert single.keys() == multi.keys()
+    closed = [(single[k].state, multi[k]) for k in single if single[k].state.closed and multi[k].state.closed]
+    assert len(closed) > 500
+    for one, three in closed:
+        assert (one.exit_reason == "TP") == (three.state.targets_hit >= 1)
+        if one.exit_reason == "SL":
+            assert three.state.exit_reason == "SL" and three.state.exit_at == one.exit_at
+        if three.state.targets_hit:
+            assert three.result["net"] > 0
 
 
 def test_replay_mlr_quality(frames):

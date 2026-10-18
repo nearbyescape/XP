@@ -1,3 +1,5 @@
+import type { Signal } from "./types";
+
 // Number and time formatting. All timestamps are shown in UTC: signals live on the 4h UTC grid.
 
 export function price(x: number | null | undefined): string {
@@ -95,4 +97,17 @@ export function monthLabel(m: string): string {
 
 export function unrealized(side: "LONG" | "SHORT", entry: number, last: number): number {
   return (side === "LONG" ? last / entry - 1 : 1 - last / entry) * 100;
+}
+
+/** Return of the whole position in percent, before costs: targets already closed plus the rest at `last`. */
+export function positionReturn(s: Pick<Signal, "side" | "entry_price" | "targets">, last: number): number {
+  const dir = s.side === "LONG" ? 1 : -1;
+  let done = 0;
+  let closed = 0;
+  for (const t of s.targets) {
+    if (t.fill_price === null) continue;
+    done += (t.size_pct / 100) * dir * (t.fill_price / s.entry_price - 1);
+    closed += t.size_pct / 100;
+  }
+  return (done + (1 - closed) * dir * (last / s.entry_price - 1)) * 100;
 }

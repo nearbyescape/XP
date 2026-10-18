@@ -122,3 +122,25 @@ async def test_login_rate_limit(client):
                           headers={"X-Forwarded-For": f"10.0.0.{i}"})
     r = await client.post("/api/admin/login", json={"username": "admin", "password": "correct horse"})
     assert r.status_code == 429
+
+
+async def test_targets_in_signal_and_stats(client):
+    entry = 100.0
+    async with db.sessions()() as s:
+        s.add(make_signal(5, uid="RSR-4H:ADAUSDT:5", strategy="RSR-4H", symbol="ADAUSDT", take_profit=101.0,
+                          targets=[[101.0, 0.5], [102.0, 0.3], [103.0, 0.2]], breakeven=True, stop_current=entry,
+                          fills=[[(NOW - timedelta(hours=8)).isoformat(), 101.0]], targets_hit=1,
+                          tp1_at=NOW - timedelta(hours=8), status="CLOSED", exit_reason="BE", exit_price=entry,
+                          exit_at=NOW - timedelta(hours=4), pnl_gross=0.005, pnl_net=0.0039, r_multiple=0.1))
+        await s.commit()
+    sig = (await client.get("/api/signals/5")).json()
+    assert [t["price"] for t in sig["targets"]] == [101.0, 102.0, 103.0]
+    assert [t["size_pct"] for t in sig["targets"]] == [50, 30, 20]
+    assert sig["targets"][0]["hit_at"] and sig["targets"][1]["hit_at"] is None
+    assert (sig["targets_hit"], sig["exit_reason"], sig["take_profit_3"]) == (1, "BE", 103.0)
+    be = (await client.get("/api/signals", params={"status": "closed", "outcome": "BE"})).json()
+    assert [x["id"] for x in be["items"]] == [5]
+    k = (await client.get("/api/stats")).json()["kpis"]
+    assert k["signals"] == 3 and k["tp1_rate"] == pytest.approx(200 / 3, abs=0.01) and k["tp2_rate"] == 0
+    csv = (await client.get("/api/signals.csv")).text
+    assert "take_profit_2" in csv.splitlines()[0]

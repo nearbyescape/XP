@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { money, num, priceInput } from "@/lib/format";
+import { money, num, price, priceInput } from "@/lib/format";
+import type { Target } from "@/lib/types";
 
 function useStored(key: string, initial: string) {
   const [v, setV] = useState(() => {
@@ -20,10 +21,11 @@ function useStored(key: string, initial: string) {
 }
 
 /** Risk-based position sizing: the stop defines the size, never the other way round. */
-export function PositionCalculator({ entry, stop, target, defaultRisk = 0.5, compact }: {
+export function PositionCalculator({ entry, stop, target, targets, defaultRisk = 0.5, compact }: {
   entry?: number;
   stop?: number;
   target?: number;
+  targets?: Target[]; // TP1/TP2/TP3 of a signal: gains are shown per target
   defaultRisk?: number;
   compact?: boolean;
 }) {
@@ -46,8 +48,10 @@ export function PositionCalculator({ entry, stop, target, defaultRisk = 0.5, com
     const notional = riskAmt / stopDist;
     const qty = notional / E;
     const reward = T > 0 ? qty * Math.abs(T - E) : null;
-    return { stopDist, riskAmt, notional, qty, leverage: notional / A, reward };
-  }, [account, risk, e, s, t]);
+    const ladder = targets?.map((x) => ({ n: x.n, size: x.size_pct / 100, qty: (qty * x.size_pct) / 100, gain: (qty * x.size_pct / 100) * Math.abs(x.price - E), price: x.price }));
+    return { stopDist, riskAmt, notional, qty, leverage: notional / A, reward, ladder };
+  }, [account, risk, e, s, t, targets]);
+  const qtyFmt = (q: number) => num(q, q >= 100 ? 2 : q >= 1 ? 4 : 6);
 
   const field = (label: string, value: string, set: (v: string) => void, suffix?: string, readOnly?: boolean) => (
     <label className="block">
@@ -66,15 +70,25 @@ export function PositionCalculator({ entry, stop, target, defaultRisk = 0.5, com
         {field("Risk per signal", risk, setRisk, "%")}
         {field("Entry", e, setE)}
         {field("Stop-loss", s, setS)}
-        {!compact && field("Take-profit (optional)", t, setT)}
+        {!compact && !targets && field("Take-profit (optional)", t, setT)}
       </div>
       <div className="rounded-xl border border-line bg-raised/60 p-4">
         {out ? (
           <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
             <dt className="text-muted">Position size</dt><dd className="num text-right text-lg font-semibold">{money(out.notional)} <span className="text-xs text-faint">USDT</span></dd>
-            <dt className="text-muted">Quantity</dt><dd className="num text-right">{num(out.qty, out.qty >= 100 ? 2 : out.qty >= 1 ? 4 : 6)}</dd>
-            <dt className="text-muted">Loss if stopped</dt><dd className="num text-right text-short">−{money(out.riskAmt)}</dd>
-            {out.reward !== null && (<><dt className="text-muted">Gain at target</dt><dd className="num text-right text-long">+{money(out.reward)}</dd></>)}
+            <dt className="text-muted">Quantity</dt><dd className="num text-right">{qtyFmt(out.qty)}</dd>
+            <dt className="text-muted">Loss if stopped{out.ladder ? " before TP1" : ""}</dt><dd className="num text-right text-short">−{money(out.riskAmt)}</dd>
+            {out.ladder ? (
+              <>
+                {out.ladder.map((x) => (
+                  <div key={x.n} className="contents">
+                    <dt className="text-muted">TP{x.n} <span className="text-faint">· sell {qtyFmt(x.qty)} at {price(x.price)}</span></dt>
+                    <dd className="num text-right text-long">+{money(x.gain)}</dd>
+                  </div>
+                ))}
+                <dt className="text-muted">Gain if every target hits</dt><dd className="num text-right font-semibold text-long">+{money(out.ladder.reduce((a, x) => a + x.gain, 0))}</dd>
+              </>
+            ) : out.reward !== null && (<><dt className="text-muted">Gain at target</dt><dd className="num text-right text-long">+{money(out.reward)}</dd></>)}
             <dt className="text-muted">Stop distance</dt><dd className="num text-right">{num(out.stopDist * 100)}%</dd>
             <dt className="text-muted">Exposure</dt>
             <dd className={`num text-right ${out.leverage > 1 ? "text-warn" : ""}`}>{num(out.leverage, 2)}× account</dd>
@@ -82,6 +96,7 @@ export function PositionCalculator({ entry, stop, target, defaultRisk = 0.5, com
         ) : (
           <p className="text-sm text-muted">Enter account size, risk, entry and stop to size the trade.</p>
         )}
+        {out?.ladder && <p className="mt-3 text-xs text-muted">After TP1, move the stop to entry: the rest of the trade can no longer lose.</p>}
         {out && out.leverage > 1 && (
           <p className="mt-3 text-xs text-warn">Exposure above 1× needs leverage. The validated strategies assume 1× notional — lower the risk instead.</p>
         )}

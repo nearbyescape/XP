@@ -18,6 +18,10 @@ function Compare({ k, b }: { k: Kpis; b: Benchmark }) {
     ["Average win", k.avg_win, b.avg_win_pct, (x) => pct(x), true],
     ["Average loss", k.avg_loss === null ? null : -k.avg_loss, -b.avg_loss_pct, (x) => pct(x), true],
   ];
+  if (b.tp2_rate !== undefined && b.tp3_rate !== undefined) {
+    rows.push(["Reached TP2", k.tp2_rate, b.tp2_rate * 100, (x) => pct(x, 1, false), true],
+              ["Reached TP3", k.tp3_rate, b.tp3_rate * 100, (x) => pct(x, 1, false), true]);
+  }
   return (
     <table className="w-full text-sm">
       <thead><tr className="table-head"><th className="px-4 py-2 sm:px-5">Metric</th><th className="px-3 py-2 text-right">Live</th><th className="px-3 py-2 text-right">Backtest</th><th className="px-4 py-2 text-right sm:px-5">Δ</th></tr></thead>
@@ -43,16 +47,18 @@ function Compare({ k, b }: { k: Kpis; b: Benchmark }) {
 function OutcomeMix({ k }: { k: Kpis }) {
   const total = k.signals || 1;
   const parts = [
-    { key: "TP", label: "Target", color: "bg-long", n: k.by_reason.TP ?? 0 },
+    { key: "TP", label: "All targets", color: "bg-long", n: k.by_reason.TP ?? 0 },
+    { key: "BE", label: "TP1+, rest at entry", color: "bg-long/50", n: k.by_reason.BE ?? 0 },
     { key: "TIME", label: "Time", color: "bg-warn", n: k.by_reason.TIME ?? 0 },
     { key: "SL", label: "Stop", color: "bg-short", n: k.by_reason.SL ?? 0 },
   ];
+  const reach = [k.tp1_rate, k.tp2_rate, k.tp3_rate];
   return (
     <div>
       <div className="flex h-2.5 overflow-hidden rounded-full bg-raised ring-1 ring-line">
         {parts.map((p) => <div key={p.key} className={p.color} style={{ width: `${(p.n / total) * 100}%` }} />)}
       </div>
-      <div className="mt-3 grid grid-cols-3 gap-2">
+      <div className="mt-3 grid grid-cols-2 gap-x-2 gap-y-3">
         {parts.map((p) => (
           <div key={p.key}>
             <div className="flex items-center gap-1.5 text-xs text-muted"><span className={clsx("h-2 w-2 rounded-full", p.color)} />{p.label}</div>
@@ -60,6 +66,20 @@ function OutcomeMix({ k }: { k: Kpis }) {
           </div>
         ))}
       </div>
+      {k.signals > 0 && (
+        <div className="mt-4 border-t border-line/60 pt-3">
+          <div className="label">Targets reached</div>
+          <div className="mt-2 space-y-1.5">
+            {reach.map((x, i) => (
+              <div key={i} className="flex items-center gap-2 text-xs">
+                <span className="num w-8 text-muted">TP{i + 1}</span>
+                <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-raised ring-1 ring-line"><div className="h-full bg-long/80" style={{ width: `${x ?? 0}%` }} /></div>
+                <span className="num w-12 text-right">{pct(x, 0, false)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

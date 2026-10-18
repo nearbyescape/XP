@@ -25,7 +25,7 @@ export default function Signals() {
     strategy: params.get("strategy") || undefined,
     symbol: params.get("symbol") || undefined,
     side: (params.get("side") as "long" | "short") || undefined,
-    outcome: tab === "history" ? ((params.get("outcome") as "TP" | "SL" | "TIME") || undefined) : undefined,
+    outcome: tab === "history" ? ((params.get("outcome") as "TP" | "SL" | "BE" | "TIME") || undefined) : undefined,
     origin: params.get("origin") || undefined,
     limit: tab === "active" ? 200 : PAGE,
     offset: tab === "active" ? 0 : page * PAGE,
@@ -64,7 +64,8 @@ export default function Signals() {
                 <>
                   <Select label="Outcome" value={params.get("outcome") ?? ""} onChange={(v) => set("outcome", v || null)}>
                     <option value="">All outcomes</option>
-                    <option value="TP">Target</option>
+                    <option value="TP">All targets</option>
+                    <option value="BE">TP1+ then entry</option>
                     <option value="SL">Stop</option>
                     <option value="TIME">Time exit</option>
                   </Select>

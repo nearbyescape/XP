@@ -90,8 +90,9 @@ What gets sent:
 
 | Event | Channel | Subscribers (DM) |
 |---|---|---|
-| New signal: entry, target (limit), stop, expiry, risk-based size, regime, backtest reference, "Open signal" button | ✓ | ✓ |
-| Signal closed: reply to the original with exit, net %, R and holding time; the original message is edited with the result | ✓ | ✓ |
+| New signal: entry, TP1 / TP2 / TP3 (limits for 50 / 30 / 20%), stop, expiry, risk-based size, regime, backtest reference, "Open signal" button | ✓ | ✓ |
+| Target hit (TP1, TP2): reply with the part closed and its price; after TP1 "move the stop to entry"; the original is stamped with the progress | ✓ | ✓ |
+| Signal closed: reply with the outcome (all targets, TPn then entry, stop, time), net %, R and holding time; the original is edited with the result | ✓ | ✓ |
 | Daily summary at 00:05 UTC (yesterday's results + 30-day stats) | ✓ | |
 | Strategy auto-paused / resumed by the kill switch | ✓ | |
 | Ops alerts (see below) | | admins only |

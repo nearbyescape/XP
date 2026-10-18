@@ -165,3 +165,66 @@ async def test_admin_alerts_and_status(tmp_path, monkeypatch):
         alerts = (await s.scalars(select(TelegramOutbox).where(TelegramOutbox.kind == "alert",
                                                                TelegramOutbox.status == "pending"))).all()
         assert {a.chat_id for a in alerts} == {"42", "43"} and "chat not found" in alerts[0].text
+
+
+def ladder_signal(**kw):
+    # SOL long: TP1/TP2/TP3 at 0.5/1.0/1.5 ATR (ATR 3.5), stop 3 ATR
+    entry, atr = 142.30, 3.5
+    targets = [[entry + k * atr, z] for k, z in ((0.5, 0.5), (1.0, 0.3), (1.5, 0.2))]
+    base = dict(take_profit=targets[0][0], stop_loss=entry - 3 * atr, targets=targets, breakeven=True,
+                stop_current=entry - 3 * atr, fills=[], targets_hit=0)
+    base.update(kw)
+    return signal(**base)
+
+
+def test_ladder_message_templates():
+    sig = ladder_signal()
+    text = fmt.new_signal(sig, 0.5)
+    assert "TP1      <code>144.05</code>   +1.23%  · 50%" in text
+    assert "TP2      <code>145.80</code>   +2.46%  · 30%" in text and "TP3      <code>147.55</code>" in text
+    assert "After TP1, move the stop to entry." in text
+    assert "TP1 88% · TP2 44% · TP3 32%" in text
+
+    at = (NOW + timedelta(hours=3)).isoformat()
+    tp1 = ladder_signal(fills=[[at, 144.05]], targets_hit=1, stop_current=142.30)
+    upd = fmt.target_update(tp1, 0)
+    assert "TP1 hit" in upd and "50% closed at <code>144.05</code> (+1.23%)" in upd
+    assert "Move the stop to entry <code>142.30</code> · 50% still open" in upd
+    assert "🎯 <b>TP1 ✓</b> · 50% still open · stop at entry" in fmt.edited_original(tp1, 0.5)
+    two = ladder_signal(fills=[[at, 144.05], [at, 145.80]], targets_hit=2)
+    assert "TP1 + TP2 hit" in fmt.target_update(two, 0)
+    assert "20% still open · stop at entry" in fmt.target_update(two, 1)
+
+    be = ladder_signal(fills=[[at, 144.05]], targets_hit=1, status="CLOSED", exit_reason="BE", exit_price=142.30,
+                       exit_at=NOW + timedelta(hours=9), pnl_net=0.0049, r_multiple=0.047)
+    assert "TP1 hit · rest closed at entry" in fmt.close_signal(be) and "net <b>+0.49%</b>" in fmt.close_signal(be)
+    allt = ladder_signal(fills=[[at, 144.05], [at, 145.80], [at, 147.55]], targets_hit=3, status="CLOSED",
+                         exit_reason="TP", exit_price=147.55, exit_at=NOW + timedelta(days=1), pnl_net=0.0221,
+                         r_multiple=0.21)
+    assert "All 3 targets hit" in fmt.close_signal(allt) and "Exit" not in fmt.close_signal(allt)
+    assert fmt.open_return(tp1, 143.0) == pytest.approx(0.5 * (144.05 / 142.30 - 1) + 0.5 * (143.0 / 142.30 - 1))
+
+
+async def test_target_update_is_a_reply_and_edits_the_original(service, monkeypatch):
+    svc, fake = service
+    monkeypatch.setattr("app.telegram.service.GROUP_GAP", 0)
+    async with db.sessions()() as s:
+        sig = ladder_signal(id=None)
+        s.add(sig)
+        await s.flush()
+        await svc.enqueue_signal_new(s, sig)
+        await s.commit()
+    await drain(svc)
+    original = next(b for m, b in fake.calls if m == "sendMessage")
+    fake.calls.clear()
+    async with db.sessions()() as s:
+        row = await s.get(Signal, sig.id)
+        row.fills, row.targets_hit, row.stop_current = [[NOW.isoformat(), 144.05]], 1, 142.30
+        await svc.enqueue_signal_update(s, row, 0)
+        await s.commit()
+    await drain(svc)
+    edit = next(b for m, b in fake.calls if m == "editMessageText")
+    reply = next(b for m, b in fake.calls if m == "sendMessage")
+    assert "TP1 ✓" in edit["text"] and "TP1 hit" in reply["text"]
+    assert reply["reply_parameters"]["message_id"] == edit["message_id"] > 100
+    assert original["chat_id"] == reply["chat_id"] == "@signals"

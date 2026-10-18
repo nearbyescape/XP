@@ -126,7 +126,7 @@ function RecentResults() {
                   {STRATEGY_STYLE[s.strategy]?.letter}
                 </span>
                 <span className="ml-auto flex items-center gap-2">
-                  <span className="flex w-16 justify-end"><OutcomeBadge reason={s.exit_reason} pnl={s.pnl_net_pct} /></span>
+                  <span className="flex w-16 justify-end"><OutcomeBadge reason={s.exit_reason} pnl={s.pnl_net_pct} hits={s.targets_hit} total={s.targets.length} /></span>
                   <PnL value={s.pnl_net_pct} className="w-16 text-right" />
                 </span>
               </Link>
@@ -179,9 +179,9 @@ export default function Overview() {
           <ol className="space-y-2.5 p-4 text-sm text-muted sm:p-5">
             {[
               ["Enter at market", "Signals publish seconds after a 4H close. The entry is the new candle's open."],
-              ["Target as a limit order", "Take-profit rests as a limit (maker fee); the stop is a stop-market order."],
+              ["Three targets as limits", "TP1, TP2 and TP3 rest as limit orders for 50%, 30% and 20% of the position (maker fees); the stop is a stop-market order."],
               ["Size by the stop", `Risk a fixed ${meta?.default_risk_pct ?? 0.5}% of equity per signal and keep exposure at 1×. The calculator does the maths.`],
-              ["Respect the time stop", "If neither level is hit by the expiry, close at market. Every outcome is logged here and in Telegram."],
+              ["Stop to entry after TP1", "Once TP1 fills, move the stop to the entry price: the rest runs risk-free. Close anything still open at the expiry. Every step is logged here and in Telegram."],
             ].map(([t, d], i) => (
               <li key={t} className="flex gap-3 rounded-lg border border-line/70 bg-raised/40 p-3">
                 <span className="num grid h-6 w-6 shrink-0 place-items-center rounded-md bg-accent/15 text-xs font-semibold text-accent">{i + 1}</span>

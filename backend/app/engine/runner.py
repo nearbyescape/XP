@@ -23,8 +23,9 @@ from .. import __version__, db
 from ..config import Settings
 from ..core.catalog import BAR_SECONDS, INTERVAL, STRATEGIES
 from ..core.evaluate import Candidate, evaluate_candle, regime_snapshot
-from ..core.lifecycle import Bar, Costs, TradeState, levels, pnl, step
+from ..core.lifecycle import Bar, Costs, pnl, step
 from ..core.ml import MLModel
+from ..core.replay import new_trade
 from ..market.base import MarketData, floor_time
 from ..models import Signal, utcnow
 from ..services import repo
@@ -190,7 +191,7 @@ class Engine:
                 return None
             cur = (kl[0].open_time, kl[0].open)
         entry = float(cur[1])
-        tp, sl = levels(c.side, entry, c.atr, c.tp_atr, c.sl_atr)
+        st = new_trade(c, entry, entry_at)
         published = state.mode == "live" and not state.auto_paused
         uid = f"{c.strategy}:{c.symbol}:{c.signal_open:%Y-%m-%dT%H:%MZ}"
         async with db.sessions()() as s:
@@ -199,7 +200,9 @@ class Engine:
             sig = Signal(
                 uid=uid, origin=self.origin, strategy=c.strategy, symbol=c.symbol, side=c.side,
                 signal_open_at=c.signal_open.to_pydatetime(), entry_at=entry_at,
-                expires_at=entry_at + BAR * c.max_bars, entry_price=entry, take_profit=tp, stop_loss=sl,
+                expires_at=st.expires_at, entry_price=entry, take_profit=st.take_profit, stop_loss=st.stop_loss,
+                targets=[[p, z] for p, z in zip(st.targets, st.sizes, strict=True)], breakeven=st.breakeven,
+                stop_current=st.stop_loss, fills=[], targets_hit=0,
                 atr=c.atr, tp_atr=c.tp_atr, sl_atr=c.sl_atr, max_bars=c.max_bars,
                 regime_coin=c.regime_coin, regime_btc=c.regime_btc, model_prob=c.model_prob,
                 model_version=self.model.version if (c.model_prob is not None and self.model) else None,
@@ -249,8 +252,8 @@ class Engine:
                                          for k in bars])
 
     async def advance(self, sig: Signal, bars: list[Bar]) -> None:
-        st = TradeState(sig.side, sig.entry_price, sig.take_profit, sig.stop_loss, sig.entry_at,
-                        sig.expires_at, sig.last_checked_at, sig.mfe or 0.0, sig.mae or 0.0, sig.last_price)
+        st = repo.trade_state(sig)
+        hit_before = st.targets_hit
         for b in bars:
             if step(st, b):
                 break
@@ -260,7 +263,7 @@ class Engine:
             row = await s.get(Signal, sig.id)
             if row is None or row.status != "ACTIVE":
                 return
-            row.last_checked_at, row.mfe, row.mae, row.last_price = st.last_checked_at, st.mfe, st.mae, st.last_price
+            repo.store_progress(row, st)
             row.updated_at = utcnow()
             if st.closed:
                 res = pnl(st, self.costs)
@@ -274,6 +277,14 @@ class Engine:
                     await self.telegram.enqueue_signal_close(s, row)
                 await s.commit()
                 await review_strategy(s, row.strategy, self.settings, self.telegram, self.clock.now())
+                await s.commit()
+            elif st.targets_hit > hit_before:
+                await repo.log_event(s, "info", "signal.target",
+                                     f"{row.strategy} {row.symbol} TP{st.targets_hit} hit"
+                                     + (" · stop moved to entry" if hit_before == 0 and row.breakeven else ""),
+                                     {"signal_id": row.id})
+                if self.telegram:
+                    await self.telegram.enqueue_signal_update(s, row, hit_before)
                 await s.commit()
             else:
                 await s.commit()

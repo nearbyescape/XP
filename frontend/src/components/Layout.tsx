@@ -59,16 +59,18 @@ function Toasts() {
           to={`/signals/${s.id}`}
           onClick={() => dismiss(id)}
           className="card pointer-events-auto animate-slideIn border-l-4 p-3.5"
-          style={{ borderLeftColor: kind === "new" ? (s.side === "LONG" ? "rgb(var(--long))" : "rgb(var(--short))") : (s.pnl_net_pct ?? 0) > 0 ? "rgb(var(--long))" : "rgb(var(--short))" }}
+          style={{ borderLeftColor: kind === "new" ? (s.side === "LONG" ? "rgb(var(--long))" : "rgb(var(--short))") : kind === "target" || (s.pnl_net_pct ?? 0) > 0 ? "rgb(var(--long))" : "rgb(var(--short))" }}
         >
-          <div className="label">{kind === "new" ? "New signal" : "Signal closed"}</div>
+          <div className="label">{{ new: "New signal", target: "Target hit", closed: "Signal closed" }[kind]}</div>
           <div className="mt-1 text-sm font-semibold">
             {s.side} {pair(s.symbol)} <span className="font-normal text-muted">· {s.strategy}</span>
           </div>
           <div className="num mt-0.5 text-xs text-muted">
             {kind === "new"
-              ? `entry ${price(s.entry_price)} · TP ${price(s.take_profit)} · SL ${price(s.stop_loss)}`
-              : `${s.exit_reason} · net ${pct(s.pnl_net_pct)}`}
+              ? `entry ${price(s.entry_price)} · ${s.targets.length > 1 ? "TP1" : "TP"} ${price(s.take_profit)} · SL ${price(s.stop_loss)}`
+              : kind === "target"
+                ? `TP${s.targets_hit} hit at ${price(s.targets[s.targets_hit - 1]?.fill_price ?? s.targets[s.targets_hit - 1]?.price)}${s.breakeven ? " · stop at entry" : ""}`
+                : `${s.exit_reason === "BE" ? `TP${s.targets_hit} · rest at entry` : s.exit_reason === "TP" && s.targets.length > 1 ? "All targets" : s.exit_reason} · net ${pct(s.pnl_net_pct)}`}
           </div>
         </Link>
       ))}

@@ -7,7 +7,7 @@ type Status = "connecting" | "open" | "closed";
 interface Toast {
   id: number;
   signal: Signal;
-  kind: "new" | "closed";
+  kind: "new" | "target" | "closed";
 }
 
 interface LiveState {
@@ -26,7 +26,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<Status>("connecting");
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [flashed, setFlashed] = useState<Set<number>>(new Set());
-  const seen = useRef(new Map<number, string>());
+  const seen = useRef(new Map<number, { status: string; hits: number }>());
   const invalidateTimer = useRef<number | null>(null);
 
   useEffect(() => {
@@ -48,13 +48,14 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     es.addEventListener("signal", (e) => {
       const s: Signal = JSON.parse((e as MessageEvent).data);
       const prev = seen.current.get(s.id);
-      seen.current.set(s.id, s.status);
+      seen.current.set(s.id, { status: s.status, hits: s.targets_hit });
       qc.setQueryData(["signal", String(s.id)], s);
       scheduleInvalidate();
       const fresh = Date.now() - new Date(s.created_at).getTime() < 10 * 60 * 1000;
       let kind: Toast["kind"] | null = null;
       if (!prev && s.status === "ACTIVE" && fresh) kind = "new";
-      else if (prev === "ACTIVE" && s.status === "CLOSED") kind = "closed";
+      else if (prev?.status === "ACTIVE" && s.status === "CLOSED") kind = "closed";
+      else if (prev?.status === "ACTIVE" && s.status === "ACTIVE" && s.targets_hit > prev.hits) kind = "target";
       if (kind) {
         const id = Date.now() + s.id;
         setToasts((t) => [...t.slice(-3), { id, signal: s, kind: kind! }]);

@@ -75,6 +75,62 @@ def test_bars_are_processed_once():
     assert st.mfe == 0.0 and mfe == pytest.approx(0.008)
 
 
+def ladder(side=1, entry=100.0, bars=12):
+    # TP1/TP2/TP3 at 1/2/3 points, 50/30/20%, stop 6 points, stop to entry after TP1
+    targets = tuple(entry + side * k for k in (1, 2, 3))
+    return TradeState(side, entry, targets[0], entry - side * 6, T0, T0 + bars * H4,
+                      targets=targets, sizes=(0.5, 0.3, 0.2), breakeven=True)
+
+
+def test_ladder_fills_targets_in_order_and_moves_stop_next_bar():
+    st = ladder()
+    assert not step(st, bar(0, 100, 101.5, 99.5, 101.2))          # TP1
+    assert st.targets_hit == 1 and st.fills[0] == (T0 + H4, 101) and st.stop_loss == 100
+    assert st.initial_stop == 94 and st.remaining == pytest.approx(0.5)
+    assert not step(st, bar(1, 101.2, 102.2, 100.6, 102))          # TP2, stop at entry untouched
+    assert st.targets_hit == 2
+    assert step(st, bar(2, 102, 103.4, 101.8, 103.1))               # TP3: fully closed
+    assert (st.exit_reason, st.exit_price, st.exit_at) == ("TP", 103, T0 + 3 * H4)
+    r = pnl(st, Costs())
+    gross = 0.5 * 0.01 + 0.3 * 0.02 + 0.2 * 0.03
+    assert r["gross"] == pytest.approx(gross)
+    assert r["net"] == pytest.approx(gross - 0.0007 - 0.0002)
+    assert r["r"] == pytest.approx(r["net"] / 0.06)
+
+
+def test_ladder_break_even_exit_after_tp1_is_a_small_win():
+    st = ladder()
+    step(st, bar(0, 100, 101.2, 99.8, 100.9))                       # TP1
+    assert step(st, bar(1, 100.9, 101.5, 99.7, 99.9))               # back to entry
+    assert st.exit_reason == "BE" and st.exit_price == 100 and st.targets_hit == 1
+    r = pnl(st, Costs())
+    assert r["net"] == pytest.approx(0.5 * 0.01 - 0.0007 - 0.5 * 0.0002 - 0.5 * 0.0008) and r["net"] > 0
+
+
+def test_ladder_stop_first_and_original_stop_inside_the_tp1_bar():
+    st = ladder()
+    assert step(st, bar(0, 100, 101.5, 93.5, 100))                  # stop and TP1 in one bar: stop first
+    assert st.exit_reason == "SL" and st.targets_hit == 0 and pnl(st, Costs())["r"] < -0.99
+
+
+def test_ladder_gap_fills_targets_at_the_open_and_time_exit_closes_the_rest():
+    st = ladder(bars=3)
+    step(st, bar(0, 100, 100.5, 99.5, 100.2))
+    assert not step(st, bar(1, 102.4, 102.6, 101.9, 102.1))         # opens above TP1 and TP2
+    assert [px for _, px in st.fills] == [102.4, 102.4] and st.stop_loss == 100
+    assert step(st, bar(2, 102.1, 102.5, 101.5, 101.8))             # TP3 not reached: time exit
+    assert st.exit_reason == "TIME" and st.exit_price == 101.8
+    assert pnl(st, Costs())["gross"] == pytest.approx(0.8 * 0.024 + 0.2 * 0.018)
+
+
+def test_ladder_short_mirrors_long():
+    st = ladder(side=-1)
+    assert not step(st, bar(0, 100, 100.2, 98.6, 98.8))             # TP1 (99)
+    assert st.targets_hit == 1 and st.stop_loss == 100
+    assert step(st, bar(1, 98.8, 100.3, 98.5, 100.1))               # back above entry
+    assert st.exit_reason == "BE"
+
+
 def rows(nets):
     return [{"exit_at": T0 + i * H4, "pnl_net": x, "r_multiple": x / 0.05, "exit_reason": "TP" if x > 0 else "SL"}
             for i, x in enumerate(nets)]

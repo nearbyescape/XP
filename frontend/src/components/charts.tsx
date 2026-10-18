@@ -52,7 +52,7 @@ function useResize(ref: React.RefObject<HTMLDivElement | null>, chart: React.Ref
   }, [ref, chart]);
 }
 
-/** 4h candles around a signal, with entry / target / stop lines and entry + exit markers. */
+/** 4h candles around a signal, with entry / target / stop lines and entry, target-hit and exit markers. */
 export function SignalChart({ candles, signal, theme }: { candles: Candle[]; signal: Signal; theme: string }) {
   const ref = useRef<HTMLDivElement>(null);
   const chart = useRef<IChartApi | null>(null);
@@ -71,7 +71,8 @@ export function SignalChart({ candles, signal, theme }: { candles: Candle[]; sig
     series.setData(candles.map((k) => ({ time: k.t as UTCTimestamp, open: k.o, high: k.h, low: k.l, close: k.c })));
     const line = (price: number, color: string, title: string, style = LineStyle.Solid) =>
       series.createPriceLine({ price, color, lineWidth: 1, lineStyle: style, axisLabelVisible: true, title });
-    line(signal.take_profit, cssColor("long"), "TP");
+    const multi = signal.targets.length > 1;
+    signal.targets.forEach((t) => line(t.price, cssColor("long", t.hit_at ? 1 : 0.75), multi ? `TP${t.n}` : "TP", t.n === 1 ? LineStyle.Solid : LineStyle.Dotted));
     line(signal.stop_loss, cssColor("short"), "SL");
     line(signal.entry_price, cssColor("accent"), "Entry", LineStyle.Dashed);
     const markers: SeriesMarker<Time>[] = [
@@ -83,14 +84,19 @@ export function SignalChart({ candles, signal, theme }: { candles: Candle[]; sig
         text: signal.side,
       },
     ];
+    const candleOf = (iso: string) => (Math.floor((new Date(iso).getTime() - 1) / 1000 / 14400) * 14400) as UTCTimestamp;
+    for (const t of signal.targets) {
+      if (!t.hit_at || (multi && t.n === signal.targets.length) || !multi) continue;  // the last one is the exit marker
+      markers.push({ time: candleOf(t.hit_at), position: signal.side === "LONG" ? "aboveBar" : "belowBar", color: cssColor("long"), shape: "circle", text: `TP${t.n}` });
+    }
     if (signal.exit_at) {
-      const t = Math.floor((new Date(signal.exit_at).getTime() - 1) / 1000 / 14400) * 14400;
+      const label = signal.exit_reason === "TP" ? (multi ? `TP${signal.targets.length}` : "TP") : signal.exit_reason ?? "";
       markers.push({
-        time: t as UTCTimestamp,
+        time: candleOf(signal.exit_at),
         position: "aboveBar",
-        color: signal.exit_reason === "TP" ? cssColor("long") : signal.exit_reason === "SL" ? cssColor("short") : cssColor("warn"),
+        color: signal.exit_reason === "TP" || signal.exit_reason === "BE" ? cssColor("long") : signal.exit_reason === "SL" ? cssColor("short") : cssColor("warn"),
         shape: "circle",
-        text: signal.exit_reason ?? "",
+        text: label,
       });
     }
     createSeriesMarkers(series, markers.sort((a, b) => Number(a.time) - Number(b.time)));

@@ -10,6 +10,11 @@ validated out-of-sample on 2017–2026 Binance data, and track every signal to i
 | C | **ML-Ranked** `MLR-4H`: LightGBM, top 5% confidence, retrained quarterly | 3,240 signals · 88.7% · PF 1.52 |
 | | **Book A + B + C** | 5,829 signals · 89.1% · PF 1.42 · +0.33% net per signal |
 
+Every signal is published with three targets: **TP1 / TP2 / TP3 at 0.5 / 1.0 / 1.5 × ATR**, closing 50 / 30 / 20%
+of the position, with the stop moved to entry once TP1 fills. Over 2022–26 that kept the win rate (89.3%) and
+return per signal, while 45% of signals also reached TP2 and 30% TP3
+([research §4](docs/crypto-signal-strategy-research.md#multiple-targets-tp1--tp2--tp3)).
+
 ## Repository
 
 | Path | What |

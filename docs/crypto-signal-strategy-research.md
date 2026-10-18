@@ -23,7 +23,7 @@
    - **A and B:** a *market-regime gate*. Buy dips only when **both the coin and BTC** are in a 4h uptrend; sell rallies only when both are in a downtrend. Same sweep-reversal entry, gate off: 0–18% of parameter sets were profitable out-of-sample; gate on: 82.5%.
    - **C:** a gradient-boosted model, retrained every quarter, that scores every coin and candle for the chance of hitting TP before SL. Only its top 5% most confident calls are published. Just 4% of its signals overlap with A/B, so it adds volume rather than duplicating it.
 4. **Signal volume:** the full book averaged **3.3 signals/day on 10 coins** (median 20/week). Days with zero signals: 32%; busy days: 9+ (top 10%), up to 29. That is the "when the market favors it" behaviour you described. On ~40 liquid perpetual futures we estimate **~8–12 signals/day**; that must be re-validated on the bigger universe (§7).
-5. **Returns are good, not miraculous.** Average win ≈ +1.2%, average loss ≈ −7.1%, net ≈ +0.33% per signal. Following every signal at **0.5% account risk per signal**, the full book returned **+16.2%/yr with a 13.8% max drawdown** out-of-sample (0.25% risk: +7.9%/yr, 7.1% drawdown). Anyone who advertises 80–90% win rates *and* large returns is either using leverage that will eventually blow up, or not counting losses.
+5. **Returns are good, not miraculous.** Average win ≈ +1.2%, average loss ≈ −7.1%, net ≈ +0.33% per signal. Each signal is published with three targets (TP1/TP2/TP3 at 0.5/1.0/1.5 × ATR, stop to entry after TP1), which keeps these numbers and lets 45% of signals run to TP2 (§4, Multiple targets). Following every signal at **0.5% account risk per signal**, the full book returned **+16.2%/yr with a 13.8% max drawdown** out-of-sample (0.25% risk: +7.9%/yr, 7.1% drawdown). Anyone who advertises 80–90% win rates *and* large returns is either using leverage that will eventually blow up, or not counting losses.
 6. **Rejected after testing:** anything on 1h or 15m (15m produced 5–26 signals/day, all losing), Bollinger/VWAP reversion, capitulation-candle fading, limit-order "wick catching", trend continuation with TP1 + break-even, altcoin-vs-BTC dislocation, market-neutral pair spreads, the CME weekend-gap fill, and ML on 1h. Numbers are in §5.
 7. **Launch plan:**
    - **Phase 1:** go live with **A + B** (pure rules; a parity-tested reference implementation is included), and run **C in shadow mode** for 6–8 weeks.
@@ -190,6 +190,39 @@ The exact feature code and training recipe are in `research/meta_label.py`. A pr
 - **Exposure (A + B):** on average 2.8 open positions, 95th percentile 8, maximum 17 (every coin signalling at once in a cascade).
 - **Position caps don't help:** capping the number of simultaneous positions did **not** reduce drawdown. Drawdowns come from losing streaks at regime transitions (deepest A + B trough Feb 2025), not from clustering. **Risk per signal is the control that matters.**
 
+### Multiple targets (TP1 / TP2 / TP3)
+
+Every signal above was validated with one target. Subscribers expect a ladder, so we replayed every
+out-of-sample signal on **1h candles** (2022 → Oct 2026, 5,977 signals; 15m candles for 2025–26 as a
+cross-check) and measured what further targets would have done. Script: `research/tp_ladder.py`;
+full tables: `research/results/tp_ladder_1h.md` and `tp_ladder_15m.md`.
+
+**Distance from entry.** The target is 0.5 × ATR(14) of the 4H chart, so it scales with each coin's volatility:
+
+| | BTC | ETH | BNB | XRP | LINK | DOT | ADA | SOL | DOGE | AVAX | All |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| TP1 (median) | 0.73% | 1.02% | 0.87% | 1.13% | 1.29% | 1.26% | 1.28% | 1.35% | 1.35% | 1.43% | **1.16%** |
+| Stop (median) | 4.8% | 6.7% | 5.8% | 7.5% | 8.5% | 8.1% | 8.2% | 9.0% | 8.7% | 9.1% | **7.6%** |
+
+The median signal reaches TP1 within **5–6 hours**. TP2 and TP3 sit at 2× and 3× the TP1 distance.
+
+**How often a target is reached before the stop** (book, within the time limit): 0.5 ATR 89.2% · 0.75 ATR 83.6% · 1.0 ATR 77.7% · 1.25 ATR 71.0% · 1.5 ATR 64.9% · 2.0 ATR 53.6%.
+
+**Scale-out plans** (A + B + C book, one signal per coin per candle, net of costs; CAGR and drawdown at 0.5% risk per signal):
+
+| Plan | Win rate | TP2 | TP3 | Net/signal | PF | CAGR | Max DD |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Single target 0.5 ATR (as validated) | 89.3% | — | — | +0.346% | 1.45 | +17.6% | 13.8% |
+| **TP 0.5 / 1.0 / 1.5 ATR, close 50 / 30 / 20%, stop to entry after TP1** | **89.3%** | **45.1%** | **30.4%** | **+0.349%** | **1.46** | **+17.3%** | **14.2%** |
+| Same targets, stop left at its original level | 73.8% | 77.9% | 65.2% | +0.474% | 1.45 | +24.8% | 24.9% |
+| Same targets, trailing (entry after TP1, TP1 after TP2) | 89.3% | 45.1% | 23.1% | +0.345% | 1.45 | +17.0% | 14.3% |
+
+- **Adopted: TP1 / TP2 / TP3 at 0.5 / 1.0 / 1.5 ATR, closing 50 / 30 / 20%, stop to entry after TP1.** It keeps the validated win rate (a signal that reaches TP1 ends at or above break-even, so the win rate *is* the TP1 hit rate) and the same return per signal, and 45% of signals also reach TP2. The 2025–26 cross-check on 15m candles agrees (88.5% win rate, +0.249% vs +0.253% per signal, identical drawdown).
+- **Not adopted: leaving the stop where it was.** It earns about a third more per signal, but the honest win rate falls to 74% and the 2022–26 drawdown nearly doubles. Counting "TP1 touched" as a win would hide that, which is the practice §2 warns about.
+- **Per strategy:** B (+0.333% vs +0.316%) and C (+0.450% vs +0.429%) gain slightly; A gives up a little (+0.204% vs +0.249%) because its 8-day holding window lets more runners drift back to entry. These differences are within the noise of a 4-year sample.
+- **Selection is unchanged.** A coin is free for a new signal of the same strategy once TP1 fills, which is exactly when the validated single-target trade ended. The parity tests check that the published signals and their TP1-or-stop outcomes are identical with and without the ladder.
+- **Convention:** a moved stop takes effect from the next candle, except that a candle which fills TP1 and closes back through the entry must have crossed the break-even stop after the fill; the rest then exits at entry. The live engine tracks on 1-minute candles, where this barely matters.
+
 ---
 
 ## 5. What failed, and why it matters for the product
@@ -324,6 +357,7 @@ python research/meta_label.py --tf 4h --tp 0.5 --sl 3.0 --bars 24 --oos 2022-01-
 python research/meta_label.py --tf 4h --tp 0.5 --sl 3.0 --bars 24 --export           # production model
 python research/latest_signals.py --at 2026-09-26T16:00Z                             # reference signals
 python research/summarize.py                                                         # funnel table
+python research/tp_ladder.py --tf 1h                                                 # TP1/TP2/TP3 study (also --tf 15m)
 ```
 See [`research/README.md`](../research/README.md) for the file map and engine assumptions.
 

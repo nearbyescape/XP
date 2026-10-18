@@ -29,11 +29,32 @@ export function SideBadge({ side }: { side: Side }) {
   );
 }
 
-export function OutcomeBadge({ reason, pnl }: { reason: ExitReason | null; pnl?: number | null }) {
-  if (!reason) return <Badge tone="accent">Active</Badge>;
-  const label = { TP: "Target", SL: "Stop", TIME: "Time" }[reason];
-  const tone = reason === "TP" ? "long" : reason === "SL" ? "short" : (pnl ?? 0) > 0 ? "long" : "warn";
-  return <Badge tone={tone}>{label}</Badge>;
+/** Result of a signal: "TP3" (every target), "TP2 · BE" (stopped at entry after TP2), "Stop", "Time". */
+export function OutcomeBadge({ reason, pnl, hits = 0, total = 1 }: { reason: ExitReason | null; pnl?: number | null; hits?: number; total?: number }) {
+  if (!reason) return <Badge tone="accent">{hits ? `TP${hits} ✓` : "Active"}</Badge>;
+  const label = {
+    TP: total > 1 ? `TP${total}` : "Target",
+    BE: `TP${hits} · BE`,
+    SL: "Stop",
+    TIME: hits ? `TP${hits} · Time` : "Time",
+  }[reason];
+  const tone = reason === "SL" ? "short" : reason === "TIME" && (pnl ?? 0) <= 0 ? "warn" : "long";
+  const title = { TP: "every target reached", BE: `TP${hits} reached, rest closed at entry`, SL: "stopped before TP1", TIME: "closed at the time limit" }[reason];
+  return <Badge tone={tone} title={title}>{label}</Badge>;
+}
+
+/** TP1 · TP2 · TP3 pills, filled once reached. */
+export function TargetPips({ hit, total }: { hit: number; total: number }) {
+  if (total < 2) return null;
+  return (
+    <span className="inline-flex items-center gap-0.5" title={`${hit} of ${total} targets reached`}>
+      {Array.from({ length: total }, (_, i) => (
+        <span key={i} className={clsx("num rounded px-1 text-[10px] font-semibold leading-4", i < hit ? "bg-long/20 text-long" : "bg-raised text-faint ring-1 ring-inset ring-line")}>
+          {i + 1}
+        </span>
+      ))}
+    </span>
+  );
 }
 
 export function Trend({ value, className }: { value: number; className?: string }) {
@@ -52,19 +73,26 @@ export function PnL({ value, className, suffix = "" }: { value: number | null | 
   );
 }
 
-/** Position of the live price between the stop (left) and the target (right). */
-export function LevelBar({ entry, tp, sl, last, compact }: { entry: number; tp: number; sl: number; last: number | null; compact?: boolean }) {
-  const span = tp - sl;
+/** Position of the live price between the stop (left) and the last target (right), with a tick per target.
+ *  Once TP1 is hit and the stop sits at entry, the loss zone is greyed out: the rest of the trade is risk-free. */
+export function LevelBar({ entry, sl, targets, hit = 0, riskFree, last, compact }: {
+  entry: number; sl: number; targets: number[]; hit?: number; riskFree?: boolean; last: number | null; compact?: boolean;
+}) {
+  const span = targets[targets.length - 1] - sl;
   const clamp = (x: number) => Math.max(0, Math.min(1, x));
   const entryPos = clamp((entry - sl) / span);
   const pos = last === null ? null : clamp((last - sl) / span);
   return (
-    <div className={clsx("relative w-full", compact ? "h-4" : "h-6")} aria-label="price between stop and target">
+    <div className={clsx("relative w-full", compact ? "h-4" : "h-6")} aria-label="price between stop and targets">
       <div className="absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 overflow-hidden rounded-full bg-raised ring-1 ring-line">
-        <div className="absolute inset-y-0 left-0 bg-gradient-to-r from-short/70 to-short/15" style={{ width: `${entryPos * 100}%` }} />
+        <div className={clsx("absolute inset-y-0 left-0", riskFree ? "bg-faint/25" : "bg-gradient-to-r from-short/70 to-short/15")} style={{ width: `${entryPos * 100}%` }} />
         <div className="absolute inset-y-0 bg-gradient-to-r from-long/20 to-long/80" style={{ left: `${entryPos * 100}%`, right: 0 }} />
       </div>
       <div className="absolute top-1/2 h-3 w-px -translate-y-1/2 bg-ink/60" style={{ left: `${entryPos * 100}%` }} title="entry" />
+      {targets.length > 1 && targets.map((t, i) => (
+        <div key={i} className={clsx("absolute top-1/2 h-2.5 w-0.5 -translate-x-1/2 -translate-y-1/2 rounded-full", i < hit ? "bg-long" : "bg-ink/35")}
+          style={{ left: `${clamp((t - sl) / span) * 100}%` }} title={`TP${i + 1}${i < hit ? " reached" : ""}`} />
+      ))}
       {pos !== null && (
         <div
           className={clsx("absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-surface shadow", pos >= entryPos ? "bg-long" : "bg-short")}

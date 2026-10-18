@@ -2,10 +2,10 @@ import clsx from "clsx";
 import { ChevronRight, Clock3 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import type { Signal } from "@/lib/types";
-import { duration, pair, price, r, unrealized, utc } from "@/lib/format";
+import { duration, pair, positionReturn, price, r, utc } from "@/lib/format";
 import { useMeta, usePrices } from "@/lib/queries";
 import { useLive } from "@/lib/live";
-import { LevelBar, OutcomeBadge, PnL, SideBadge, StrategyChip, useNow } from "./bits";
+import { LevelBar, OutcomeBadge, PnL, SideBadge, StrategyChip, TargetPips, useNow } from "./bits";
 import { Badge, Skeleton } from "./ui";
 
 function Coin({ symbol, compact }: { symbol: string; compact?: boolean }) {
@@ -31,22 +31,24 @@ export function ActiveSignalsTable({ rows, loading }: { rows: Signal[]; loading?
     <ul className="divide-y divide-line/60 sm:hidden">
       {rows.map((s) => {
         const last = prices?.prices?.[s.symbol] ?? s.last_price;
-        const upnl = last ? unrealized(s.side, s.entry_price, last) : null;
+        const upnl = last ? positionReturn(s, last) : null;
         const left = (new Date(s.expires_at).getTime() - now) / 1000;
+        const riskFree = s.breakeven && s.targets_hit > 0;
+        const lastTarget = s.targets[s.targets.length - 1];
         return (
           <li key={s.id} onClick={() => nav(`/signals/${s.id}`)} className={clsx("cursor-pointer px-4 py-3.5 active:bg-raised", flashed.has(s.id) && "animate-flash")}>
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2"><Coin symbol={s.symbol} /><SideBadge side={s.side} /></div>
               <PnL value={upnl} className="text-sm font-semibold" />
             </div>
-            <div className="mt-2.5"><LevelBar entry={s.entry_price} tp={s.take_profit} sl={s.stop_loss} last={last} compact /></div>
+            <div className="mt-2.5"><LevelBar entry={s.entry_price} sl={s.stop_loss} targets={s.targets.map((t) => t.price)} hit={s.targets_hit} riskFree={riskFree} last={last} compact /></div>
             <div className="num mt-1 flex justify-between text-2xs">
-              <span className="text-short/90">SL {price(s.stop_loss)}</span>
+              <span className={riskFree ? "text-faint line-through" : "text-short/90"}>SL {price(s.stop_loss)}</span>
               <span className="text-muted">entry {price(s.entry_price)}</span>
-              <span className="text-long/90">TP {price(s.take_profit)}</span>
+              <span className="text-long/90">TP{lastTarget.n > 1 ? lastTarget.n : ""} {price(lastTarget.price)}</span>
             </div>
             <div className="mt-2 flex items-center justify-between text-xs text-muted">
-              <StrategyChip code={s.strategy} />
+              <span className="flex items-center gap-2"><StrategyChip code={s.strategy} /><TargetPips hit={s.targets_hit} total={s.targets.length} /></span>
               <span className="num inline-flex items-center gap-1"><Clock3 size={12} />{left > 0 ? duration(left) : "closing"} left</span>
             </div>
           </li>
@@ -61,7 +63,7 @@ export function ActiveSignalsTable({ rows, loading }: { rows: Signal[]; loading?
             <th className="px-3 py-2.5">Strategy</th>
             <th className="px-3 py-2.5 text-right">Entry</th>
             <th className="px-3 py-2.5 text-right">Last</th>
-            <th className="w-[22%] px-3 py-2.5">Stop ⟶ Target</th>
+            <th className="w-[22%] px-3 py-2.5">Stop ⟶ Targets</th>
             <th className="px-3 py-2.5 text-right">Open P&amp;L</th>
             <th className="px-3 py-2.5 text-right">Time left</th>
             <th className="w-8" />
@@ -70,21 +72,23 @@ export function ActiveSignalsTable({ rows, loading }: { rows: Signal[]; loading?
         <tbody>
           {rows.map((s) => {
             const last = prices?.prices?.[s.symbol] ?? s.last_price;
-            const upnl = last ? unrealized(s.side, s.entry_price, last) : null;
+            const upnl = last ? positionReturn(s, last) : null;
             const left = (new Date(s.expires_at).getTime() - now) / 1000;
+            const riskFree = s.breakeven && s.targets_hit > 0;
+            const lastTarget = s.targets[s.targets.length - 1];
             return (
               <tr key={s.id} onClick={() => nav(`/signals/${s.id}`)} className={clsx("table-row cursor-pointer", flashed.has(s.id) && "animate-flash")}>
                 <td className="px-4 py-3 sm:px-5">
                   <div className="flex items-center gap-3"><Coin symbol={s.symbol} /><SideBadge side={s.side} /></div>
                 </td>
-                <td className="px-3 py-3"><StrategyChip code={s.strategy} /></td>
+                <td className="px-3 py-3"><div className="flex flex-col items-start gap-1"><StrategyChip code={s.strategy} /><TargetPips hit={s.targets_hit} total={s.targets.length} /></div></td>
                 <td className="num px-3 py-3 text-right text-muted">{price(s.entry_price)}</td>
                 <td className="num px-3 py-3 text-right">{price(last)}</td>
                 <td className="px-3 py-3">
-                  <LevelBar entry={s.entry_price} tp={s.take_profit} sl={s.stop_loss} last={last} compact />
+                  <LevelBar entry={s.entry_price} sl={s.stop_loss} targets={s.targets.map((t) => t.price)} hit={s.targets_hit} riskFree={riskFree} last={last} compact />
                   <div className="num mt-0.5 flex justify-between text-2xs text-faint">
-                    <span className="text-short/80">{price(s.stop_loss)}</span>
-                    <span className="text-long/80">{price(s.take_profit)}</span>
+                    <span className={riskFree ? "line-through" : "text-short/80"} title={riskFree ? "stop moved to entry" : "stop"}>{price(s.stop_loss)}</span>
+                    <span className="text-long/80" title={`TP${lastTarget.n}`}>{price(lastTarget.price)}</span>
                   </div>
                 </td>
                 <td className="px-3 py-3 text-right"><PnL value={upnl} /></td>
@@ -116,7 +120,7 @@ export function HistoryTable({ rows, loading }: { rows: Signal[]; loading?: bool
         <li key={s.id} onClick={() => nav(`/signals/${s.id}`)} className="flex cursor-pointer items-center gap-3 px-4 py-3 active:bg-raised">
           <div className="w-[72px] shrink-0"><Coin symbol={s.symbol} compact /></div>
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-1.5"><SideBadge side={s.side} /><OutcomeBadge reason={s.exit_reason} pnl={s.pnl_net_pct} /></div>
+            <div className="flex items-center gap-1.5"><SideBadge side={s.side} /><OutcomeBadge reason={s.exit_reason} pnl={s.pnl_net_pct} hits={s.targets_hit} total={s.targets.length} /></div>
             <div className="num mt-1 truncate text-2xs text-faint">{utc(s.entry_at)} · {s.strategy}</div>
           </div>
           <div className="text-right">
@@ -156,7 +160,7 @@ export function HistoryTable({ rows, loading }: { rows: Signal[]; loading?: bool
                 <td className="num px-3 py-3 text-muted">{utc(s.entry_at)}</td>
                 <td className="num px-3 py-3 text-right text-muted">{price(s.entry_price)}</td>
                 <td className="num px-3 py-3 text-right">{s.status === "CLOSED" ? price(s.exit_price) : "—"}</td>
-                <td className="px-3 py-3"><OutcomeBadge reason={s.exit_reason} pnl={s.pnl_net_pct} /></td>
+                <td className="px-3 py-3"><OutcomeBadge reason={s.exit_reason} pnl={s.pnl_net_pct} hits={s.targets_hit} total={s.targets.length} /></td>
                 <td className="px-3 py-3 text-right"><PnL value={s.status === "CLOSED" ? s.pnl_net_pct : s.unrealized_pct} /></td>
                 <td className={clsx("num px-3 py-3 text-right", (s.r_multiple ?? 0) >= 0 ? "text-muted" : "text-short")}>{r(s.r_multiple)}</td>
                 <td className="num px-3 py-3 text-right text-muted">{held !== null ? duration(held) : "—"}</td>

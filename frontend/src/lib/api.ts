@@ -50,7 +50,7 @@ export interface SignalFilters {
   strategy?: string;
   symbol?: string;
   side?: "long" | "short";
-  outcome?: "TP" | "SL" | "TIME";
+  outcome?: "TP" | "SL" | "BE" | "TIME";
   origin?: string;
   limit?: number;
   offset?: number;

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from sqlalchemy import (JSON, BigInteger, Boolean, Double, ForeignKey, Index, Integer, SmallInteger,
-                        String, Text)
+                        String, Text, false, text)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .db import Base, UTCDateTime
@@ -52,8 +52,15 @@ class Signal(Base):
     entry_at: Mapped[datetime] = mapped_column(UTCDateTime, index=True)  # signal candle close
     expires_at: Mapped[datetime] = mapped_column(UTCDateTime)
     entry_price: Mapped[float] = mapped_column(Double)
-    take_profit: Mapped[float] = mapped_column(Double)
-    stop_loss: Mapped[float] = mapped_column(Double)
+    take_profit: Mapped[float] = mapped_column(Double)                 # TP1
+    stop_loss: Mapped[float] = mapped_column(Double)                   # planned stop
+    # multiple targets: [[price, fraction of position], ...] TP1 first; NULL = take_profit for 100%
+    targets: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    breakeven: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())  # stop → entry after TP1
+    stop_current: Mapped[float | None] = mapped_column(Double, nullable=True)  # stop in force now
+    fills: Mapped[list | None] = mapped_column(JSON, nullable=True)    # [[iso time, price], ...] per target hit
+    targets_hit: Mapped[int] = mapped_column(SmallInteger, default=0, server_default=text("0"))
+    tp1_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)  # coin is free from here
     atr: Mapped[float] = mapped_column(Double)
     tp_atr: Mapped[float] = mapped_column(Double)
     sl_atr: Mapped[float] = mapped_column(Double)
@@ -67,7 +74,7 @@ class Signal(Base):
     published: Mapped[bool] = mapped_column(Boolean, index=True)  # pushed to Telegram / live book
 
     status: Mapped[str] = mapped_column(String(8), default="ACTIVE")  # ACTIVE | CLOSED
-    exit_reason: Mapped[str | None] = mapped_column(String(8), nullable=True)  # TP | SL | TIME
+    exit_reason: Mapped[str | None] = mapped_column(String(8), nullable=True)  # TP | SL | BE | TIME
     exit_price: Mapped[float | None] = mapped_column(Double, nullable=True)
     exit_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     pnl_gross: Mapped[float | None] = mapped_column(Double, nullable=True)

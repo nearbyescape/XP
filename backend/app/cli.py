@@ -67,19 +67,23 @@ async def backfill_ledger(since: str, until: str | None) -> None:
             uid = f"{c.strategy}:{c.symbol}:{c.signal_open:%Y-%m-%dT%H:%MZ}"
             if await s.scalar(select(Signal.id).where(Signal.uid == uid)):
                 continue
-            s.add(Signal(
+            row = Signal(
                 uid=uid, origin="backfill", strategy=c.strategy, symbol=c.symbol, side=c.side,
                 signal_open_at=c.signal_open.to_pydatetime(), entry_at=st.entry_at, expires_at=st.expires_at,
-                entry_price=st.entry_price, take_profit=st.take_profit, stop_loss=st.stop_loss, atr=c.atr,
+                entry_price=st.entry_price, take_profit=st.take_profit, stop_loss=st.initial_stop,
+                targets=[[p, z] for p, z in zip(st.targets, st.sizes, strict=True)], breakeven=st.breakeven,
+                atr=c.atr,
                 tp_atr=c.tp_atr, sl_atr=c.sl_atr, max_bars=c.max_bars, regime_coin=c.regime_coin,
                 regime_btc=c.regime_btc, model_prob=c.model_prob,
                 model_version=model.version if (model and c.model_prob is not None) else None,
                 mode="backfill", published=False,
                 status="CLOSED" if st.closed else "ACTIVE", exit_reason=st.exit_reason,
                 exit_price=st.exit_price, exit_at=st.exit_at, pnl_gross=t.result.get("gross"),
-                pnl_net=t.result.get("net"), r_multiple=t.result.get("r"), mfe=st.mfe, mae=st.mae,
-                last_price=st.last_price or st.entry_price, last_checked_at=st.last_checked_at,
-            ))
+                pnl_net=t.result.get("net"), r_multiple=t.result.get("r"),
+            )
+            repo.store_progress(row, st)
+            row.last_price = st.last_price or st.entry_price
+            s.add(row)
             added += 1
         await s.commit()
     print(f"backfill ledger: {added} signals written ({start:%Y-%m-%d} → {end:%Y-%m-%d})")

@@ -72,10 +72,10 @@ class TelegramService:
             s.add(TelegramOutbox(chat_id=chat, kind="signal_new", signal_id=sig.id, text=text,
                                  reply_markup=kb, next_attempt_at=utcnow()))
 
-    async def enqueue_signal_close(self, s, sig: Signal) -> None:
+    async def _follow_up(self, s, sig: Signal, kind: str, text: str) -> None:
+        """Reply in every chat that received the original signal, and edit the original there."""
         if not self.enabled or not sig.published:
             return
-        # reply in every chat that received the original, plus edit the original there
         chats = (await s.scalars(select(TelegramOutbox.chat_id).where(
             TelegramOutbox.signal_id == sig.id, TelegramOutbox.kind == "signal_new",
             TelegramOutbox.status.in_(["sent", "pending"])))).all()
@@ -84,8 +84,14 @@ class TelegramService:
             s.add(TelegramOutbox(chat_id=chat, kind="signal_edit", signal_id=sig.id,
                                  text=fmt.edited_original(sig, self.settings.default_risk_pct),
                                  reply_markup=kb, next_attempt_at=utcnow()))
-            s.add(TelegramOutbox(chat_id=chat, kind="signal_close", signal_id=sig.id,
-                                 text=fmt.close_signal(sig), next_attempt_at=utcnow()))
+            s.add(TelegramOutbox(chat_id=chat, kind=kind, signal_id=sig.id, text=text, next_attempt_at=utcnow()))
+
+    async def enqueue_signal_update(self, s, sig: Signal, hit_before: int) -> None:
+        """TP1 / TP2 filled while part of the position is still open."""
+        await self._follow_up(s, sig, "signal_update", fmt.target_update(sig, hit_before))
+
+    async def enqueue_signal_close(self, s, sig: Signal) -> None:
+        await self._follow_up(s, sig, "signal_close", fmt.close_signal(sig))
 
     async def enqueue_notice(self, s, text: str, chat_id: str | None = None, kind: str = "notice") -> None:
         if not self.enabled:
@@ -122,7 +128,7 @@ class TelegramService:
     async def deliver(self, s, row: TelegramOutbox) -> None:
         await self._pace(row.chat_id)
         try:
-            if row.kind in ("signal_edit", "signal_close"):
+            if row.kind in ("signal_edit", "signal_update", "signal_close"):
                 original = await self._original_message_id(s, row)
                 if original is None:
                     # the original is still queued: try again shortly (never reorder results first)

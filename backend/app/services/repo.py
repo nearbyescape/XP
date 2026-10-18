@@ -9,6 +9,7 @@ import pandas as pd
 from sqlalchemy import desc, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..core.lifecycle import TradeState
 from ..db import upsert
 from ..market.base import Kline
 from ..models import Candle, EngineEvent, Signal, StrategyState, SystemState, utcnow
@@ -55,13 +56,36 @@ async def open_signals(s: AsyncSession) -> list[Signal]:
 
 
 async def positions_open_at(s: AsyncSession, t: datetime) -> set[tuple[str, str]]:
-    """(strategy, symbol) pairs still open at time t: active, or exited after t.
+    """(strategy, symbol) pairs that still hold the coin at time t: neither exited nor at TP1 by t.
 
-    Using "as of t" (not just status) keeps the one-open-signal-per-coin rule exact even when
-    the tracker has already processed later candles (demo catch-up, restarts)."""
+    A signal frees its coin when it closes or reaches TP1 (the rest of the position then runs with
+    the stop at entry), which is exactly when the validated single-target trade ends. Using "as of t"
+    (not just status) keeps the rule exact even when the tracker has already processed later candles
+    (demo catch-up, restarts)."""
     rows = await s.execute(select(Signal.strategy, Signal.symbol).where(
-        Signal.entry_at <= t, (Signal.status == "ACTIVE") | (Signal.exit_at > t)))
+        Signal.entry_at <= t, (Signal.status == "ACTIVE") | (Signal.exit_at > t),
+        Signal.tp1_at.is_(None) | (Signal.tp1_at > t)))
     return {(a, b) for a, b in rows.all()}
+
+
+# --- signal <-> trade state ----------------------------------------------------------------
+def trade_state(sig: Signal) -> TradeState:
+    targets = sig.targets or []
+    return TradeState(
+        sig.side, sig.entry_price, sig.take_profit, sig.stop_current or sig.stop_loss, sig.entry_at,
+        sig.expires_at, sig.last_checked_at, sig.mfe or 0.0, sig.mae or 0.0, sig.last_price,
+        targets=tuple(p for p, _ in targets), sizes=tuple(z for _, z in targets),
+        breakeven=bool(sig.breakeven), initial_stop=sig.stop_loss,
+        fills=[(datetime.fromisoformat(t), px) for t, px in (sig.fills or [])])
+
+
+def store_progress(row: Signal, st: TradeState) -> None:
+    """Copy tracking progress (excursions, target fills, moved stop) onto the row."""
+    row.last_checked_at, row.mfe, row.mae, row.last_price = st.last_checked_at, st.mfe, st.mae, st.last_price
+    row.fills = [[t.isoformat(), px] for t, px in st.fills]
+    row.targets_hit = st.targets_hit
+    row.tp1_at = st.fills[0][0] if st.fills else None
+    row.stop_current = st.stop_loss
 
 
 async def closed_signals(s: AsyncSession, strategy: str | None = None, published_only: bool = True,

@@ -1,8 +1,9 @@
 """Performance statistics over closed signals.
 
 Input rows are mappings with: exit_at (datetime), pnl_net (fraction of notional), r_multiple,
-exit_reason. Definitions match the research report: win = net P&L > 0; profit factor = sum of
-net wins / |sum of net losses|; break-even win rate = avg loss / (avg win + avg loss).
+exit_reason and optionally targets_hit. Definitions match the research report: win = net P&L > 0;
+profit factor = sum of net wins / |sum of net losses|; break-even win rate = avg loss / (avg win +
+avg loss); tpN_rate = share of signals that reached target N.
 """
 
 from __future__ import annotations
@@ -19,7 +20,8 @@ def kpis(rows: Iterable[Mapping], days: float | None = None) -> dict:
         return {"signals": 0, "wins": 0, "losses": 0, "win_rate": None, "breakeven_win_rate": None,
                 "avg_win": None, "avg_loss": None, "profit_factor": None, "expectancy": None,
                 "avg_r": None, "total_r": 0.0, "max_consecutive_losses": 0,
-                "signals_per_day": 0.0 if days else None, "by_reason": {}}
+                "signals_per_day": 0.0 if days else None, "by_reason": {},
+                "tp1_rate": None, "tp2_rate": None, "tp3_rate": None}
     nets = [float(r["pnl_net"]) for r in rows]
     wins = [x for x in nets if x > 0]
     losses = [x for x in nets if x <= 0]
@@ -34,6 +36,7 @@ def kpis(rows: Iterable[Mapping], days: float | None = None) -> dict:
     reasons: dict[str, int] = {}
     for r in rows:
         reasons[r["exit_reason"]] = reasons.get(r["exit_reason"], 0) + 1
+    hits = [max(int(r.get("targets_hit") or 0), int(r["exit_reason"] == "TP")) for r in rows]
     return {
         "signals": n,
         "wins": len(wins),
@@ -49,6 +52,7 @@ def kpis(rows: Iterable[Mapping], days: float | None = None) -> dict:
         "max_consecutive_losses": streak,
         "signals_per_day": (n / days) if days else None,
         "by_reason": reasons,
+        **{f"tp{k}_rate": sum(h >= k for h in hits) / n for k in (1, 2, 3)},
     }
 
 
