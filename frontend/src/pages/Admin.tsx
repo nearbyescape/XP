@@ -133,6 +133,8 @@ function Telegram({ ov }: { ov: AdminOverview }) {
             <dt className="text-muted">Bot</dt><dd className="num text-right">{t.bot?.bot ? `@${t.bot.bot}` : t.bot?.error ? <span className="text-short">{t.bot.error}</span> : "connecting…"}</dd>
             <dt className="text-muted">Channel</dt><dd className="num text-right">{t.channel_id ?? "—"}</dd>
             <dt className="text-muted">DM subscribers</dt><dd className="num text-right">{t.dm_enabled ? t.subscribers : "disabled"}</dd>
+            <dt className="text-muted">Ops alerts</dt>
+            <dd className="num text-right">{t.admin_chats ? `${t.admin_chats} admin chat${t.admin_chats > 1 ? "s" : ""}` : <span className="text-warn" title="Set TELEGRAM_ADMIN_CHAT_IDS (send /id to the bot)">off</span>}</dd>
             <dt className="text-muted">Queue</dt><dd className="num text-right">{t.queue.pending ?? 0} pending · {t.queue.sent ?? 0} sent · <span className={(t.queue.failed ?? 0) ? "text-short" : ""}>{t.queue.failed ?? 0} failed</span></dd>
           </dl>
         )}

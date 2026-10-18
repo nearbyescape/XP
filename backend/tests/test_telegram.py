@@ -126,3 +126,42 @@ async def test_bot_commands(service):
         assert "/subscribe" in await svc.handle_message(s, msg("/whatever"))
         group = {"chat": {"id": -100, "type": "supergroup"}, "text": "/start"}
         assert await svc.handle_message(s, group) is None
+
+
+async def test_admin_alerts_and_status(tmp_path, monkeypatch):
+    db.configure(f"sqlite+aiosqlite:///{tmp_path}/tg_admin.db")
+    await db.create_all()
+    fake = FakeTelegram()
+    client = TelegramClient("TOKEN", http=httpx.AsyncClient(transport=httpx.MockTransport(fake.handler)))
+    settings = Settings(telegram_bot_token="TOKEN", telegram_channel_id="@signals", environment="test",
+                        telegram_admin_chat_ids="42, 43")
+    svc = TelegramService(settings, Clock(), client)
+    msg = lambda chat_id, text: {"chat": {"id": chat_id, "type": "private"}, "text": text}  # noqa: E731
+    async with db.sessions()() as s:
+        alert = fmt.alert("SignalDesk", "error", "market.down", "binance_spot unreachable for 5m <timeout>")
+        assert alert.startswith("🔴") and "&lt;timeout&gt;" in alert
+        assert await svc.enqueue_admin(s, alert, key="market.down")
+        assert not await svc.enqueue_admin(s, alert, key="market.down")  # throttled
+        assert await svc.enqueue_admin(s, alert, key="market.recovered")
+        await s.commit()
+        assert "<code>7</code>" in await svc.handle_message(s, msg(7, "/id"))
+        assert "Engine status" in await svc.handle_message(s, msg(42, "/status"))
+        assert "Engine status" not in await svc.handle_message(s, msg(7, "/status"))  # not an admin
+    await drain(svc)
+    sends = [b for m, b in fake.calls if m == "sendMessage"]
+    assert sorted(b["chat_id"] for b in sends) == ["42", "42", "43", "43"]
+
+    # a delivery that keeps failing for a regular chat raises one admin alert
+    monkeypatch.setattr("app.telegram.service.MAX_ATTEMPTS", 1)
+    fake.calls.clear()
+    fail = lambda request: httpx.Response(400, json={"ok": False, "error_code": 400,  # noqa: E731
+                                                     "description": "Bad Request: chat not found"})
+    svc.client = TelegramClient("TOKEN", http=httpx.AsyncClient(transport=httpx.MockTransport(fail)))
+    async with db.sessions()() as s:
+        await svc.enqueue_notice(s, "hello")
+        await s.commit()
+    await drain(svc)
+    async with db.sessions()() as s:
+        alerts = (await s.scalars(select(TelegramOutbox).where(TelegramOutbox.kind == "alert",
+                                                               TelegramOutbox.status == "pending"))).all()
+        assert {a.chat_id for a in alerts} == {"42", "43"} and "chat not found" in alerts[0].text

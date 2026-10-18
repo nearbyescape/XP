@@ -16,6 +16,7 @@ from ..config import Settings
 from ..core import stats
 from ..models import Signal, StrategyState
 from ..services import repo
+from ..telegram import formatting as fmt
 
 log = logging.getLogger(__name__)
 
@@ -47,6 +48,8 @@ async def review_strategy(s, code: str, settings: Settings, telegram, now: datet
                 await telegram.enqueue_notice(
                     s, f"⏸ <b>{code} paused</b> — rolling performance dropped below its safety limits. "
                        f"It keeps running in paper mode and resumes automatically after recovering.")
+                await telegram.enqueue_admin(s, fmt.alert(settings.app_name, "warning", "strategy.paused",
+                                                          f"{code} auto-paused: {st.pause_reason}"))
             log.warning("%s auto-paused: %s", code, st.pause_reason)
         return
     since = (await s.scalars(select(Signal).where(Signal.strategy == code, Signal.status == "CLOSED",
@@ -61,3 +64,6 @@ async def review_strategy(s, code: str, settings: Settings, telegram, now: datet
                              f"{code} resumed after {h['signals']} paper signals (PF {h['profit_factor']:.2f})")
         if telegram:
             await telegram.enqueue_notice(s, f"▶️ <b>{code} resumed</b> after recovering in paper mode.")
+            await telegram.enqueue_admin(s, fmt.alert(settings.app_name, "info", "strategy.resumed",
+                                                      f"{code} resumed after {h['signals']} paper signals "
+                                                      f"(PF {h['profit_factor']:.2f})"))

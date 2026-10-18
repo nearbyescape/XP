@@ -213,6 +213,7 @@ export interface AdminOverview {
     dm_enabled: boolean;
     bot: { bot?: string | null; ok?: boolean; error?: string; at?: string } | null;
     subscribers: number;
+    admin_chats: number;
     queue: Record<string, number>;
   };
   events: { id: number; ts: string; level: string; kind: string; message: string }[];

@@ -62,6 +62,8 @@ class Settings(BaseSettings):
     telegram_dm_enabled: bool = True            # subscribers get signals in a private chat
     telegram_daily_digest: bool = True
     telegram_api_base: str = "https://api.telegram.org"
+    # private chat ids (comma-separated) that receive ops alerts and may use /status; send /id to the bot
+    telegram_admin_chat_ids: str = ""
 
     # --- security ---------------------------------------------------------------------------
     admin_username: str = "admin"
@@ -93,6 +95,10 @@ class Settings(BaseSettings):
     @property
     def telegram_enabled(self) -> bool:
         return bool(self.telegram_bot_token and self.telegram_bot_token.get_secret_value())
+
+    @property
+    def admin_chats(self) -> list[str]:
+        return [c.strip() for c in self.telegram_admin_chat_ids.split(",") if c.strip()]
 
     @property
     def indexing_allowed(self) -> bool:

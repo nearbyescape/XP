@@ -89,7 +89,8 @@ async def overview(user: str = Depends(auth.require_admin), s: AsyncSession = De
         "strategies": strategies,
         "telegram": {"enabled": settings.telegram_enabled, "channel_id": settings.telegram_channel_id,
                      "channel_url": settings.telegram_channel_url, "dm_enabled": settings.telegram_dm_enabled,
-                     "bot": await repo.get_state(s, "telegram"), "subscribers": subs, "queue": queue},
+                     "bot": await repo.get_state(s, "telegram"), "subscribers": subs, "queue": queue,
+                     "admin_chats": len(settings.admin_chats)},
         "events": [{"id": e.id, "ts": e.ts, "level": e.level, "kind": e.kind, "message": e.message}
                    for e in events],
         "config": {"source": settings.market_data_source, "universe": settings.symbols,

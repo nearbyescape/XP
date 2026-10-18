@@ -12,6 +12,8 @@ export default defineConfig({
   },
   build: {
     sourcemap: false,
+    // never inline assets as data: URIs; the nginx CSP only allows same-origin fonts and images
+    assetsInlineLimit: 0,
     chunkSizeWarningLimit: 900,
   },
 });

@@ -22,6 +22,7 @@ dashboard and Telegram, then tracks each one to its target, stop or time limit.
 | `engine` | Market data, signal evaluation, tracking, kill switch, Telegram delivery and bot commands |
 | `api` | Read API, live event stream (SSE), admin console API |
 | `web` | nginx: dashboard, `/api` proxy, security headers, search-engine blocking |
+| `backup` | Daily `pg_dump` of the database into `./backups`, with retention |
 | `caddy` | *optional* (`--profile tls`): automatic HTTPS with Let's Encrypt |
 
 ## 1. Server requirements
@@ -93,6 +94,20 @@ What gets sent:
 | Signal closed: reply to the original with exit, net %, R and holding time; the original message is edited with the result | ✓ | ✓ |
 | Daily summary at 00:05 UTC (yesterday's results + 30-day stats) | ✓ | |
 | Strategy auto-paused / resumed by the kill switch | ✓ | |
+| Ops alerts (see below) | | admins only |
+
+**Ops alerts for you.** Press Start on your bot, send `/id`, and put the number it replies with in
+`TELEGRAM_ADMIN_CHAT_IDS` (comma-separate several admins). Those chats then receive:
+
+- engine started (after every deploy or restart);
+- Binance unreachable for 5 minutes, and recovered;
+- a 4H candle still missing after retries, or a loop error (e.g. the tracker);
+- a strategy auto-paused or resumed by the kill switch, with the numbers that triggered it;
+- a Telegram delivery that failed permanently (e.g. the bot lost its channel admin rights).
+
+Alerts of the same kind are sent at most once every 30 minutes. Admins can also send `/status` to
+the bot for the engine clock, the last evaluation, open signals, the Telegram queue and the
+strategy modes.
 
 Users subscribe by pressing **Start** on the bot (or `/subscribe`). If a user blocks the bot, they
 are unsubscribed automatically. Delivery goes through a database outbox, paced to Telegram's
@@ -143,14 +158,21 @@ is the source of truth.
 
 | Task | Command |
 |---|---|
-| Status | `docker compose ps` · `docker compose exec engine python -m app.cli status` |
+| Status | `docker compose ps` (engine, api and web report *healthy*) · `docker compose exec engine python -m app.cli status` · `/status` to the bot |
 | Logs (JSON) | `docker compose logs -f engine api` |
 | Health | `curl -s http://127.0.0.1:8080/api/health` (`engine_alive` turns false if the engine misses heartbeats for 90 s) |
 | Update | `git pull && docker compose up -d --build` (migrations run automatically) |
-| Backup | `docker compose exec -T db pg_dump -U signals -Fc signals > signals-$(date +%F).dump` |
-| Restore | `docker compose exec -T db pg_restore -U signals -d signals --clean < signals-YYYY-MM-DD.dump` |
+| Backup now | `docker compose exec -T db pg_dump -U signals -Fc signals > signals-$(date +%F).dump` |
+| Restore | `docker compose exec -T db pg_restore -U signals -d signals --clean < backups/signals-YYYYMMDDTHHMMZ.dump` |
 
-Schedule the backup daily (cron). The signal ledger is the product's track record.
+**Backups are automatic.** The `backup` service writes `./backups/signals-<UTC time>.dump` every
+`BACKUP_INTERVAL_HOURS` (24) and deletes dumps older than `BACKUP_KEEP_DAYS` (14). The signal
+ledger is the product's track record, so also copy `./backups` off the server, for example with a
+nightly `rclone copy` or `rsync` to object storage. `docker compose logs backup` shows each run.
+
+**Health checks.** The engine container turns *unhealthy* when its heartbeat (written every 15 s
+after a successful database write) is older than 90 seconds; the first start allows 10 minutes
+for the candle backfill. `engine_alive` in `/api/health` reports the same from the API side.
 
 **Restarts are safe.**
 - Signal ids are idempotent (`strategy:symbol:candle`), so a restart within the same 4H candle
@@ -193,7 +215,8 @@ published, and excluded from live statistics unless "+ Backfill" is selected.
 - [ ] HTTPS is in front of the site and `COOKIE_SECURE=true`.
 - [ ] PostgreSQL is not published to the host (the compose file does not expose port 5432).
 - [ ] `.env` is not committed (it is in `.gitignore`).
-- [ ] Daily `pg_dump` backups are taken and kept off the server.
+- [ ] `./backups` fills daily (`ls backups/`) and is copied off the server.
+- [ ] `TELEGRAM_ADMIN_CHAT_IDS` is set, so outages reach you on Telegram.
 
 The admin session is an httpOnly, SameSite=Strict cookie. Mutating requests also require an
 `X-Requested-With` header. nginx sends a strict Content-Security-Policy (no inline scripts, no
@@ -204,7 +227,7 @@ Permissions-Policy.
 
 | Symptom | Check |
 |---|---|
-| "Engine offline" badge | `docker compose logs engine`. Usually Binance is unreachable from the server's region (see §1). |
+| "Engine offline" badge | `docker compose logs engine`. Usually Binance is unreachable from the server's region (see §1); with admin alerts on you get a `market.down` message after 5 minutes. |
 | No signals for days | Normal in neutral regimes (BTC without a clear trend). See the regime card. `app.cli status` shows the last evaluated candle. |
 | Telegram test never arrives | Admin console → Telegram: bot error text; is the bot an admin of the channel; is `TELEGRAM_CHANNEL_ID` right (`@name` or `-100…`)? |
 | Admin login fails over HTTP | Set `COOKIE_SECURE=false` for plain-HTTP testing only. |

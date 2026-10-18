@@ -1,6 +1,6 @@
 import clsx from "clsx";
 import { Activity, Menu, Moon, Send, Sun, X } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Link, NavLink, useLocation } from "react-router-dom";
 import { useMeta } from "@/lib/queries";
 import { useTheme } from "@/lib/theme";
@@ -82,6 +82,11 @@ export function Layout({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const loc = useLocation();
   const name = meta?.app_name ?? "SignalDesk";
+  useEffect(() => {
+    const page = loc.pathname.startsWith("/admin") ? "Admin"
+      : NAV.find((n) => n.to !== "/" && loc.pathname.startsWith(n.to))?.label;
+    document.title = page ? `${page} · ${name}` : name;
+  }, [loc.pathname, name]);
 
   return (
     <div className="flex min-h-screen flex-col">

@@ -14,6 +14,7 @@ import asyncio
 import logging
 import time
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import pandas as pd
 from sqlalchemy import select
@@ -27,12 +28,15 @@ from ..core.ml import MLModel
 from ..market.base import MarketData, floor_time
 from ..models import Signal, utcnow
 from ..services import repo
+from ..telegram import formatting as fmt
 from ..telegram.service import TelegramService
 from .clock import Clock
 from .killswitch import review_strategy
 
 log = logging.getLogger(__name__)
 BAR = timedelta(seconds=BAR_SECONDS)
+MARKET_DOWN_ALERT_SECONDS = 300
+ALIVE_FILE = "/tmp/engine.alive"  # touched by the heartbeat; read by the container healthcheck
 
 
 class Engine:
@@ -61,11 +65,10 @@ class Engine:
             resume = pd.Timestamp(last_eval["candle"]).to_pydatetime() + BAR
             if resume > self.clock.now():
                 self.clock.jump_to(resume)  # demo restarted: continue where it stopped
-        async with db.sessions()() as s:
-            await repo.log_event(s, "info", "engine.start",
-                                 f"engine {__version__} started ({self.market.name}, origin={self.origin})",
-                                 {"symbols": self.symbols, "model": self.model.version if self.model else None})
-            await s.commit()
+        await self.event("info", "engine.start",
+                         f"engine {__version__} started ({self.market.name}, origin={self.origin})",
+                         {"symbols": self.symbols, "model": self.model.version if self.model else None},
+                         alert=True)
         for sym in self.data_symbols:
             await self.backfill(sym)
         now = pd.Timestamp(self.clock.now())
@@ -150,6 +153,10 @@ class Engine:
                 break
             log.warning("candle %s missing for %s (attempt %d)", t, missing, attempt + 1)
             await self.clock.sleep(10)
+        else:
+            await self.event("warning", "candle.incomplete",
+                             f"{t:%Y-%m-%d %H:%M} candle still missing for {', '.join(missing)} after retries; "
+                             f"evaluated without them")
         # exits inside the candle that just closed must free their coin before we evaluate it
         await self.track_once(until=(t + pd.Timedelta(BAR)).to_pydatetime())
         close_t = (t + pd.Timedelta(BAR)).to_pydatetime()
@@ -273,16 +280,37 @@ class Engine:
 
     # ------------------------------------------------------------------ prices / heartbeat
     async def price_loop(self) -> None:
+        """Last prices for the dashboard; doubles as the market-data outage detector."""
         interval = self.settings.price_interval_seconds if not self.clock.simulated else 900
+        down_since: float | None = None
+        alerted = False
         while True:
             try:
                 prices = await self.market.prices(self.symbols)
-                async with db.sessions()() as s:
-                    await repo.set_state(s, "prices", {"at": self.clock.now().isoformat(), "prices": prices})
-                    await s.commit()
             except Exception as exc:  # noqa: BLE001
                 log.warning("price refresh failed: %s", exc)
+                if down_since is None:
+                    down_since = time.monotonic()
+                down_for = time.monotonic() - down_since
+                if not alerted and down_for >= MARKET_DOWN_ALERT_SECONDS:
+                    alerted = True
+                    await self.safe(self.event("error", "market.down",
+                                               f"{self.market.name} unreachable for {fmt.duration(down_for)}: "
+                                               f"{exc.__class__.__name__}: {exc}"), "prices")
+            else:
+                if alerted:
+                    await self.safe(self.event("info", "market.recovered",
+                                               f"{self.market.name} reachable again after "
+                                               f"{fmt.duration(time.monotonic() - down_since)}", alert=True),
+                                    "prices")
+                down_since, alerted = None, False
+                await self.safe(self.store_prices(prices), "prices")
             await self.clock.sleep(interval)
+
+    async def store_prices(self, prices: dict) -> None:
+        async with db.sessions()() as s:
+            await repo.set_state(s, "prices", {"at": self.clock.now().isoformat(), "prices": prices})
+            await s.commit()
 
     async def heartbeat_loop(self) -> None:
         while True:
@@ -300,6 +328,7 @@ class Engine:
                         "candles": {k: str(v.ts.iloc[-1]) for k, v in self.frames.items() if len(v)},
                     })
                     await s.commit()
+                Path(ALIVE_FILE).touch()
             except Exception:  # noqa: BLE001
                 log.exception("heartbeat failed")
             await asyncio.sleep(15)
@@ -310,10 +339,15 @@ class Engine:
             await repo.set_state(s, "last_eval", {"candle": t.isoformat(), "at": utcnow().isoformat(), **extra})
             await s.commit()
 
-    async def event(self, level: str, kind: str, message: str, data: dict | None = None) -> None:
+    async def event(self, level: str, kind: str, message: str, data: dict | None = None,
+                    alert: bool | None = None) -> None:
+        """Record an engine event. Warnings and errors also alert the admin chats (throttled per kind)."""
         log.log({"warning": logging.WARNING, "error": logging.ERROR}.get(level, logging.INFO), message)
         async with db.sessions()() as s:
             await repo.log_event(s, level, kind, message, data)
+            if self.telegram and (level in ("warning", "error") if alert is None else alert):
+                await self.telegram.enqueue_admin(s, fmt.alert(self.settings.app_name, level, kind, message),
+                                                  key=kind)
             await s.commit()
 
     async def safe(self, coro, name: str) -> None:

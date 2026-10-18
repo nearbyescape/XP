@@ -155,6 +155,31 @@ def welcome(app_name: str, channel_url: str | None, subscribed: bool) -> str:
     return "\n".join(lines)
 
 
+def alert(app_name: str, level: str, kind: str, message: str) -> str:
+    icon = {"error": "🔴", "warning": "🟠"}.get(level, "🟢")
+    return f"{icon} <b>{escape(app_name)}</b> · <code>{escape(kind)}</code>\n{escape(message)}"
+
+
+def status(hb: dict, last_eval: dict, states: dict, open_count: int, queue: dict) -> str:
+    when = lambda iso: f"{iso[:16].replace('T', ' ')} UTC" if iso else "—"  # noqa: E731
+    evaluated = "skipped" if last_eval.get("skipped") else f"{last_eval.get('signals', 0)} signal(s)"
+    lines = [
+        "<b>Engine status</b>",
+        f"Version {escape(str(hb.get('version', '?')))} · {escape(str(hb.get('source', '?')))}"
+        f" · up {duration(hb.get('uptime_s') or 0)}",
+        f"Clock: {when(hb.get('clock'))}",
+        f"Last 4H evaluation: {when(last_eval.get('candle'))} · {evaluated}",
+        f"Open signals: {open_count}",
+        f"Telegram queue: {queue.get('pending', 0)} pending · {queue.get('failed', 0)} failed",
+        "",
+        "<b>Strategies</b>",
+    ]
+    for code, st in sorted(states.items()):
+        mode = "auto-paused" if st.auto_paused else st.mode
+        lines.append(f"<code>{code}</code> {mode}" + (f" — {escape(st.pause_reason)}" if st.pause_reason else ""))
+    return "\n".join(lines)
+
+
 HELP = ("<b>Commands</b>\n"
         "/signals — open signals\n"
         "/stats — performance (30 days and all time)\n"

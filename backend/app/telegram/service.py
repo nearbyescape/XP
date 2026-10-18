@@ -29,6 +29,7 @@ MAX_ATTEMPTS = 6
 GROUP_GAP = 3.1      # seconds between messages to the same group/channel
 PRIVATE_GAP = 0.05   # seconds between messages to the same private chat
 GLOBAL_GAP = 0.04
+ALERT_COOLDOWN = 1800  # seconds between two admin alerts of the same kind
 
 
 def is_group(chat_id: str) -> bool:
@@ -45,6 +46,7 @@ class TelegramService:
                                          settings.telegram_api_base)
         self._last_sent: dict[str, float] = {}
         self._last_global = 0.0
+        self._alerted: dict[str, float] = {}
         self.bot_username: str | None = None
 
     @property
@@ -91,6 +93,19 @@ class TelegramService:
         chat = chat_id or self.settings.telegram_channel_id
         if chat:
             s.add(TelegramOutbox(chat_id=chat, kind=kind, text=text, next_attempt_at=utcnow()))
+
+    async def enqueue_admin(self, s, text: str, key: str | None = None) -> bool:
+        """Ops alert to TELEGRAM_ADMIN_CHAT_IDS. Alerts sharing a key are throttled."""
+        if not self.enabled or not self.settings.admin_chats:
+            return False
+        now = time.monotonic()
+        if key:
+            if key in self._alerted and now - self._alerted[key] < ALERT_COOLDOWN:
+                return False
+            self._alerted[key] = now
+        for chat in self.settings.admin_chats:
+            s.add(TelegramOutbox(chat_id=chat, kind="alert", text=text, next_attempt_at=utcnow()))
+        return True
 
     # ---------------------------------------------------------------- sender
     async def _pace(self, chat: str) -> None:
@@ -144,6 +159,11 @@ class TelegramService:
             elif row.attempts >= MAX_ATTEMPTS or exc.code == 400:
                 row.status = "failed"
                 log.error("telegram delivery failed for outbox %s: %s", row.id, exc)
+                if row.kind != "alert" and row.chat_id not in self.settings.admin_chats:
+                    await self.enqueue_admin(s, fmt.alert(
+                        self.settings.app_name, "error", "telegram.failed",
+                        f"{row.kind} to {row.chat_id} failed after {row.attempts} attempt(s): {exc}"),
+                        key=f"telegram.failed:{row.chat_id}")
             else:
                 backoff = exc.retry_after or min(300, 2 ** row.attempts * 5)
                 row.next_attempt_at = utcnow() + timedelta(seconds=backoff)
@@ -173,6 +193,12 @@ class TelegramService:
             return None
         cmd = text.split()[0].split("@")[0].lower()
         chat_id = int(chat["id"])
+        if cmd == "/id":
+            return f"Your chat id: <code>{chat_id}</code>"
+        if cmd == "/status" and str(chat_id) in self.settings.admin_chats:
+            return fmt.status(await repo.get_state(s, "heartbeat", {}), await repo.get_state(s, "last_eval", {}),
+                              await repo.strategy_states(s), len(await repo.open_signals(s)),
+                              await self.queue_health(s))
         sub = await s.get(TelegramSubscriber, chat_id)
 
         async def set_active(active: bool):

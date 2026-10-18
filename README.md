@@ -19,7 +19,8 @@ validated out-of-sample on 2017–2026 Binance data, and track every signal to i
 | `research/` | Backtesting harness, results, the production ML model |
 | `backend/` | Python: signal engine, FastAPI API, Telegram bot, PostgreSQL schema (Alembic) |
 | `frontend/` | React + TypeScript dashboard, served by nginx |
-| `docker-compose.yml` | Production stack (db, migrate, api, engine, web, optional Caddy TLS) |
+| `docker-compose.yml` | Production stack (db, migrate, api, engine, web, daily backups, optional Caddy TLS) |
+| `.github/workflows/ci.yml` | CI: lint, tests, migrations, frontend build, Docker build and a search-blocking smoke test |
 
 ## Quick start
 
@@ -43,6 +44,10 @@ ruff check .
 # frontend (proxies /api to 127.0.0.1:8000)
 cd frontend && npm ci && npm run dev
 ```
+
+CI runs on every push. The parity and engine E2E tests need the research candles
+(`python research/data/fetch_klines.py`, ~90 MB), so CI skips them; run them locally before
+changing anything in `backend/app/core` or `backend/app/engine`.
 
 The engine's signals are tested against the research harness:
 - `backend/tests/test_parity.py` checks rules, all 48 ML features and model scores, and that a

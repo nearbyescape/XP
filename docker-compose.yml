@@ -61,6 +61,13 @@ services:
     depends_on:
       migrate: { condition: service_completed_successfully }
     stop_grace_period: 20s
+    # the heartbeat touches this file every 15 s after a successful database write
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os, sys, time; sys.exit(time.time() - os.path.getmtime('/tmp/engine.alive') > 90)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10m
 
   web:
     image: signaldesk-web:${APP_VERSION:-latest}
@@ -74,6 +81,25 @@ services:
       - "${WEB_BIND:-0.0.0.0}:${WEB_PORT:-8080}:8080"
     depends_on:
       api: { condition: service_healthy }
+    restart: unless-stopped
+    logging: *logging
+
+  # daily pg_dump of the signal ledger into ./backups (kept BACKUP_KEEP_DAYS days)
+  backup:
+    image: postgres:16-alpine
+    entrypoint: ["/bin/sh", "/backup.sh"]
+    environment:
+      PGHOST: db
+      PGUSER: ${POSTGRES_USER:-signals}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      PGDATABASE: ${POSTGRES_DB:-signals}
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+      BACKUP_INTERVAL_HOURS: ${BACKUP_INTERVAL_HOURS:-24}
+    volumes:
+      - ./deploy/backup.sh:/backup.sh:ro
+      - ${BACKUP_DIR:-./backups}:/backups
+    depends_on:
+      db: { condition: service_healthy }
     restart: unless-stopped
     logging: *logging
 
