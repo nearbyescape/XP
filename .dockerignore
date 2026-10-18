@@ -1,0 +1,15 @@
+**/.git
+**/node_modules
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+**/*.db
+.env
+frontend/dist
+research/data
+research/results/grids
+research/results/candidates
+research/results/meta_preds_*
+research/results/*.csv
+research/results/*.md
+docs

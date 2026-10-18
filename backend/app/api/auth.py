@@ -23,8 +23,12 @@ MAX_FAILURES, WINDOW_S = 8, 900
 
 
 def client_ip(request: Request) -> str:
-    fwd = request.headers.get("x-forwarded-for")
-    return fwd.split(",")[0].strip() if fwd else (request.client.host if request.client else "?")
+    """nginx resolves the real client address (trusted proxies only) into X-Real-IP; never trust a
+    raw, client-supplied X-Forwarded-For here or the login rate limit can be bypassed."""
+    real = request.headers.get("x-real-ip")
+    if real:
+        return real.strip()
+    return request.client.host if request.client else "?"
 
 
 def check_rate(ip: str) -> None:

@@ -116,7 +116,9 @@ async def test_admin_flow(client):
 
 
 async def test_login_rate_limit(client):
-    for _ in range(8):
-        await client.post("/api/admin/login", json={"username": "x", "password": "y"})
+    # rotating a spoofed X-Forwarded-For must not reset the limit
+    for i in range(8):
+        await client.post("/api/admin/login", json={"username": "x", "password": "y"},
+                          headers={"X-Forwarded-For": f"10.0.0.{i}"})
     r = await client.post("/api/admin/login", json={"username": "admin", "password": "correct horse"})
     assert r.status_code == 429

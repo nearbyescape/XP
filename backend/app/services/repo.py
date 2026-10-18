@@ -54,6 +54,16 @@ async def open_signals(s: AsyncSession) -> list[Signal]:
                                  .order_by(Signal.entry_at))).all())
 
 
+async def positions_open_at(s: AsyncSession, t: datetime) -> set[tuple[str, str]]:
+    """(strategy, symbol) pairs still open at time t: active, or exited after t.
+
+    Using "as of t" (not just status) keeps the one-open-signal-per-coin rule exact even when
+    the tracker has already processed later candles (demo catch-up, restarts)."""
+    rows = await s.execute(select(Signal.strategy, Signal.symbol).where(
+        Signal.entry_at <= t, (Signal.status == "ACTIVE") | (Signal.exit_at > t)))
+    return {(a, b) for a, b in rows.all()}
+
+
 async def closed_signals(s: AsyncSession, strategy: str | None = None, published_only: bool = True,
                          since: datetime | None = None, origin: str | None = None,
                          limit: int | None = None) -> list[Signal]:

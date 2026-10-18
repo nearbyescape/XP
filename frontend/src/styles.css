@@ -1,0 +1,55 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Design tokens: RGB triplets so Tailwind can apply alpha (bg-surface/60 etc.) */
+:root,
+[data-theme="dark"] {
+  --bg: 10 13 18;
+  --surface: 16 20 27;
+  --raised: 22 27 36;
+  --line: 33 40 53;
+  --ink: 231 235 242;
+  --muted: 138 148 166;
+  --faint: 92 102 121;
+  --accent: 110 139 255;
+  --long: 46 189 133;
+  --short: 240 97 109;
+  --warn: 245 181 68;
+  color-scheme: dark;
+}
+
+[data-theme="light"] {
+  --bg: 245 246 249;
+  --surface: 255 255 255;
+  --raised: 248 249 251;
+  --line: 226 230 237;
+  --ink: 15 21 32;
+  --muted: 91 101 119;
+  --faint: 145 154 170;
+  --accent: 66 99 235;
+  --long: 15 157 99;
+  --short: 214 60 75;
+  --warn: 196 128 18;
+  color-scheme: light;
+}
+
+@layer base {
+  html { font-feature-settings: "cv11", "ss01"; }
+  body { @apply min-h-screen bg-bg text-ink; }
+  ::selection { background: rgb(var(--accent) / 0.3); }
+  * { scrollbar-width: thin; scrollbar-color: rgb(var(--line)) transparent; }
+}
+
+@layer components {
+  .card { @apply rounded-xl border border-line bg-surface shadow-card; }
+  .card-pad { @apply p-4 sm:p-5; }
+  .label { @apply text-2xs font-medium uppercase tracking-[0.08em] text-muted; }
+  .num { @apply font-mono tabular-nums; }
+  .btn { @apply inline-flex items-center justify-center gap-2 rounded-lg border border-line bg-raised px-3 py-1.5 text-sm font-medium text-ink transition hover:border-faint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 disabled:cursor-not-allowed disabled:opacity-50; }
+  .btn-primary { @apply border-transparent bg-accent text-white hover:brightness-110; }
+  .input { @apply w-full rounded-lg border border-line bg-raised px-3 py-2 text-sm text-ink placeholder:text-faint focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30; }
+  .table-head { @apply border-b border-line text-left text-2xs font-medium uppercase tracking-[0.08em] text-muted; }
+  .table-row { @apply border-b border-line/60 transition-colors last:border-0 hover:bg-raised/70; }
+  .link { @apply text-accent underline-offset-4 hover:underline; }
+}

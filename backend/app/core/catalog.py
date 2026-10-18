@@ -49,9 +49,9 @@ RSR = StrategySpec(
     params={"lookback": 24, "loc": 0.5, "trend_n": 200, "slope": 24},
     summary=("A liquidity sweep: price runs the 4-day low (triggering resting stops) and closes "
              "back above it, while the coin and BTC trend the same way."),
-    rules=("LONG  if low < lowest low of prior 24 candles and close back above it,\n"
-           "      close in the upper half of the candle, coin and BTC trend UP\n"
-           "SHORT mirrored on the 24-candle high with coin and BTC trend DOWN\n"
+    rules=("LONG  if low < lowest low of prior 24 candles, close back above it,\n"
+           "close in the upper half of the candle, coin and BTC trend UP\n"
+           "SHORT mirrored on the 24-candle high, coin and BTC trend DOWN\n"
            "TP 0.5 x ATR(14) · SL 3.0 x ATR(14) · time stop 24 candles (4 days)"),
     benchmark={"period": "2022-01 → 2026-10", "signals": 947, "win_rate": 0.883,
                "breakeven_win_rate": 0.837, "profit_factor": 1.47, "net_pct": 0.32,

@@ -38,7 +38,7 @@ def create_app() -> FastAPI:
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
         response = await call_next(request)
-        if not settings.search_indexing:
+        if not settings.indexing_allowed:
             response.headers["X-Robots-Tag"] = NOINDEX
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
@@ -48,7 +48,8 @@ def create_app() -> FastAPI:
 
     @app.get("/robots.txt", include_in_schema=False)
     async def robots():  # served by nginx in production; here for direct API access
-        body = "User-agent: *\nAllow: /\n" if settings.search_indexing else "User-agent: *\nDisallow: /\n"
+        crawlable = settings.search_indexing in ("true", "deindex")
+        body = "User-agent: *\nAllow: /\n" if crawlable else "User-agent: *\nDisallow: /\n"
         return PlainTextResponse(body)
 
     app.include_router(public.router)

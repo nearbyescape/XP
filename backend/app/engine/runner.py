@@ -126,8 +126,13 @@ class Engine:
             last_t = pd.Timestamp(last_eval["candle"]) if last_eval.get("candle") else None
             if last_t is None or last_t < pd.Timestamp(target):
                 lag = now - current
-                # a simulated clock keeps running while we compute, so latency only matters live
-                if self.clock.simulated or lag <= timedelta(minutes=self.settings.max_signal_latency_minutes):
+                if self.clock.simulated:
+                    # the demo clock keeps running while we compute: catch up candle by candle
+                    t = pd.Timestamp(target) if last_t is None else last_t + pd.Timedelta(BAR)
+                    while t <= pd.Timestamp(target):
+                        await self.safe(self.process_candle(t), "candle")
+                        t += pd.Timedelta(BAR)
+                elif lag <= timedelta(minutes=self.settings.max_signal_latency_minutes):
                     await self.safe(self.process_candle(pd.Timestamp(target)), "candle")
                 else:
                     await self.event("warning", "candle.skipped",
@@ -140,19 +145,19 @@ class Engine:
         for attempt in range(4):
             await self.sync_candles(t.to_pydatetime() - 2 * BAR)
             missing = [s for s in self.data_symbols
-                       if s not in self.frames or self.frames[s].empty or self.frames[s].ts.iloc[-1] != t]
+                       if s not in self.frames or self.frames[s].empty or not (self.frames[s].ts == t).any()]
             if not missing:
                 break
             log.warning("candle %s missing for %s (attempt %d)", t, missing, attempt + 1)
             await self.clock.sleep(10)
         # exits inside the candle that just closed must free their coin before we evaluate it
-        await self.track_once()
+        await self.track_once(until=(t + pd.Timedelta(BAR)).to_pydatetime())
+        close_t = (t + pd.Timedelta(BAR)).to_pydatetime()
         async with db.sessions()() as s:
             states = await repo.strategy_states(s)
-            open_rows = await repo.open_signals(s)
+            open_positions = await repo.positions_open_at(s, close_t)
         enabled = {c for c, st in states.items() if st.mode != "off"}
-        open_positions = {(r.strategy, r.symbol) for r in open_rows}
-        frames = {k: v for k, v in self.frames.items() if not v.empty and v.ts.iloc[-1] <= t}
+        frames = {k: v[v.ts <= t] for k, v in self.frames.items() if not v.empty}
         cands = await asyncio.to_thread(evaluate_candle, frames, t, self.symbols, open_positions,
                                         enabled, self.model)
         created = []
@@ -214,12 +219,12 @@ class Engine:
             await self.safe(self.track_once(), "tracker")
             await self.clock.sleep(interval)
 
-    async def track_once(self) -> None:
+    async def track_once(self, until: datetime | None = None) -> None:
         async with db.sessions()() as s:
             rows = await repo.open_signals(s)
         if not rows:
             return
-        now = self.clock.now()
+        now = min(self.clock.now(), until) if until else self.clock.now()
         fine = self.market.fine_interval
         by_symbol: dict[str, list[Signal]] = {}
         for r in rows:

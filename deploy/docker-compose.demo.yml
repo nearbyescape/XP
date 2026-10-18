@@ -1,0 +1,17 @@
+# Demo / staging: replay stored historical candles through the live engine on a fast clock.
+#   python research/data/fetch_klines.py               # once: downloads candles into research/data/parquet
+#   docker compose -f docker-compose.yml -f deploy/docker-compose.demo.yml up -d --build
+# Use a separate database (POSTGRES_DB) from production: demo signals are tagged origin=demo.
+services:
+  engine:
+    environment:
+      MARKET_DATA_SOURCE: replay
+      REPLAY_DATA_DIR: /data/parquet
+      REPLAY_START: ${REPLAY_START:-2026-08-01T00:00:00Z}
+      REPLAY_SPEED: ${REPLAY_SPEED:-600}
+      TELEGRAM_BOT_TOKEN: ${DEMO_TELEGRAM_BOT_TOKEN:-}
+    volumes:
+      - ./research/data/parquet:/data/parquet:ro
+  api:
+    environment:
+      MARKET_DATA_SOURCE: replay

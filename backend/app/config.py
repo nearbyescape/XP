@@ -69,7 +69,8 @@ class Settings(BaseSettings):
     secret_key: SecretStr = SecretStr("change-me")
     session_hours: int = 12
     cookie_secure: bool = True
-    search_indexing: bool = False  # False => X-Robots-Tag noindex on every API response
+    # false (default) | deindex | true — mirrors the nginx policy; anything but "true" adds noindex
+    search_indexing: Literal["false", "deindex", "true"] = "false"
 
     @field_validator("backfill_from", "replay_start", mode="after")
     @classmethod
@@ -92,6 +93,10 @@ class Settings(BaseSettings):
     @property
     def telegram_enabled(self) -> bool:
         return bool(self.telegram_bot_token and self.telegram_bot_token.get_secret_value())
+
+    @property
+    def indexing_allowed(self) -> bool:
+        return self.search_indexing == "true"
 
     @property
     def is_replay(self) -> bool:

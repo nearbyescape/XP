@@ -93,7 +93,7 @@ async def overview(user: str = Depends(auth.require_admin), s: AsyncSession = De
         "events": [{"id": e.id, "ts": e.ts, "level": e.level, "kind": e.kind, "message": e.message}
                    for e in events],
         "config": {"source": settings.market_data_source, "universe": settings.symbols,
-                   "risk_pct": settings.default_risk_pct, "search_indexing": settings.search_indexing,
+                   "risk_pct": settings.default_risk_pct, "search_indexing": settings.indexing_allowed,
                    "public_base_url": settings.public_base_url},
     }
 

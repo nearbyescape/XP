@@ -1,0 +1,16 @@
+# Automatic HTTPS for the dashboard. Requires DOMAIN (DNS A/AAAA record pointing at this server)
+# and ports 80/443 open. Security and robots headers are set by the `web` (nginx) container.
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+	reverse_proxy web:8080 {
+		flush_interval -1
+	}
+}

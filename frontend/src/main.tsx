@@ -1,0 +1,72 @@
+import "@fontsource-variable/inter";
+import "@fontsource-variable/jetbrains-mono";
+import "./styles.css";
+
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { lazy, StrictMode, Suspense } from "react";
+import { createRoot } from "react-dom/client";
+import { BrowserRouter, Link, Route, Routes } from "react-router-dom";
+import { Layout } from "./components/Layout";
+import { Card, Empty, Skeleton } from "./components/ui";
+import { LiveProvider } from "./lib/live";
+import { ThemeProvider } from "./lib/theme";
+import { useMeta } from "./lib/queries";
+import { useEffect } from "react";
+import Overview from "./pages/Overview";
+
+const Signals = lazy(() => import("./pages/Signals"));
+const SignalDetail = lazy(() => import("./pages/SignalDetail"));
+const Performance = lazy(() => import("./pages/Performance"));
+const Strategies = lazy(() => import("./pages/Strategies"));
+const CalculatorPage = lazy(() => import("./pages/CalculatorPage"));
+const Admin = lazy(() => import("./pages/Admin"));
+
+const queryClient = new QueryClient({
+  defaultOptions: { queries: { staleTime: 10_000, refetchOnWindowFocus: true, retry: 1 } },
+});
+
+function Title() {
+  const { data } = useMeta();
+  useEffect(() => {
+    if (data?.app_name) document.title = data.app_name;
+  }, [data?.app_name]);
+  return null;
+}
+
+function NotFound() {
+  return (
+    <Card>
+      <Empty title="Page not found">
+        <Link className="link" to="/">Back to the overview</Link>
+      </Empty>
+    </Card>
+  );
+}
+
+createRoot(document.getElementById("root")!).render(
+  <StrictMode>
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider>
+        <LiveProvider>
+          <BrowserRouter>
+            <Title />
+            <Layout>
+              <Suspense fallback={<Skeleton className="h-96" />}>
+                <Routes>
+                  <Route path="/" element={<Overview />} />
+                  <Route path="/signals" element={<Signals />} />
+                  <Route path="/signals/:id" element={<SignalDetail />} />
+                  <Route path="/performance" element={<Performance />} />
+                  <Route path="/strategies" element={<Strategies />} />
+                  <Route path="/calculator" element={<CalculatorPage />} />
+                  <Route path="/admin" element={<Admin />} />
+                  <Route path="*" element={<NotFound />} />
+                </Routes>
+              </Suspense>
+            </Layout>
+          </BrowserRouter>
+        </LiveProvider>
+      </ThemeProvider>
+    </QueryClientProvider>
+  </StrictMode>,
+);
