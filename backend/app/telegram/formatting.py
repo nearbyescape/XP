@@ -144,7 +144,7 @@ def target_update(sig: Signal, hit_before: int) -> str:
     targets, fills = targets_of(sig), fills_of(sig)
     new = range(hit_before, sig.targets_hit or 0)
     head = " + ".join(f"TP{i + 1}" for i in new)
-    lines = [f"🎯 <b>{head} hit</b> · {side_pair(sig)}"]
+    lines = [f"🎯 <b>{head} hit</b>", side_pair(sig)]
     for i in new:
         px = fills[i] if i < len(fills) else targets[i][0]
         lines.append(f"{size_pct(targets[i][1])} closed at <code>{price(px)}</code> ({pct(move(sig, px))})")
@@ -161,7 +161,7 @@ def close_signal(sig: Signal) -> str:
     held = (sig.exit_at - sig.entry_at).total_seconds() if sig.exit_at else 0
     exit_line = "" if sig.exit_reason == "TP" and len(targets_of(sig)) > 1 else \
         f"Exit <code>{price(sig.exit_price)}</code> · "
-    return (f"{icon} <b>{label}</b> · {side_pair(sig)}\n"
+    return (f"{icon} <b>{label}</b>\n{side_pair(sig)}\n"
             f"{exit_line}net <b>{pct(sig.pnl_net)}</b> ({sig.r_multiple:+.2f}R) · held {duration(held)}")
 
 
@@ -264,7 +264,9 @@ def digest(day: datetime, closed: list[Signal], k30: dict) -> str:
     wins = sum(1 for s in closed if (s.pnl_net or 0) > 0)
     lines = [f"<b>Daily summary · {day:%d %b %Y}</b>"]
     if closed:
-        lines.append(f"{len(closed)} closed · {wins} wins · {len(closed) - wins} losses · "
+        losses = len(closed) - wins
+        lines.append(f"{len(closed)} closed · {wins} win{'' if wins == 1 else 's'} · "
+                     f"{losses} loss{'' if losses == 1 else 'es'} · "
                      f"net {sum(s.r_multiple or 0 for s in closed):+.2f}R")
         for s in closed[:12]:
             hits = f" · TP{s.targets_hit}" if (s.targets_hit or 0) and len(targets_of(s)) > 1 else ""

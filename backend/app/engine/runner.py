@@ -122,27 +122,39 @@ class Engine:
 
     async def candle_loop(self) -> None:
         while True:
-            now = self.clock.now()
-            current = floor_time(now, INTERVAL)
-            target = current - BAR  # the most recently closed candle
-            async with db.sessions()() as s:
-                last_eval = await repo.get_state(s, "last_eval", {})
-            last_t = pd.Timestamp(last_eval["candle"]) if last_eval.get("candle") else None
-            if last_t is None or last_t < pd.Timestamp(target):
-                lag = now - current
-                if self.clock.simulated:
-                    # the demo clock keeps running while we compute: catch up candle by candle
-                    t = pd.Timestamp(target) if last_t is None else last_t + pd.Timedelta(BAR)
-                    while t <= pd.Timestamp(target):
-                        await self.safe(self.process_candle(t), "candle")
-                        t += pd.Timedelta(BAR)
-                elif lag <= timedelta(minutes=self.settings.max_signal_latency_minutes):
-                    await self.safe(self.process_candle(pd.Timestamp(target)), "candle")
-                else:
-                    await self.event("warning", "candle.skipped",
-                                     f"skipped evaluation of {target:%Y-%m-%d %H:%M} (engine was {lag} late)")
-                    await self.set_last_eval(pd.Timestamp(target), skipped=True)
-            await self.clock.sleep_until(current + BAR + timedelta(seconds=self.settings.eval_delay_seconds))
+            try:
+                wake = await self.candle_tick()
+            except Exception as exc:  # noqa: BLE001 - e.g. the database is unreachable: retry, don't exit
+                log.exception("candle loop error")
+                await self.safe(self.event("error", "candle.error", f"candle: {exc.__class__.__name__}: {exc}"),
+                                "candle")
+                await self.clock.sleep(30)
+                continue
+            await self.clock.sleep_until(wake)
+
+    async def candle_tick(self) -> datetime:
+        """Evaluate every closed candle not evaluated yet; returns when to wake up next."""
+        now = self.clock.now()
+        current = floor_time(now, INTERVAL)
+        target = current - BAR  # the most recently closed candle
+        async with db.sessions()() as s:
+            last_eval = await repo.get_state(s, "last_eval", {})
+        last_t = pd.Timestamp(last_eval["candle"]) if last_eval.get("candle") else None
+        if last_t is None or last_t < pd.Timestamp(target):
+            lag = now - current
+            if self.clock.simulated:
+                # the demo clock keeps running while we compute: catch up candle by candle
+                t = pd.Timestamp(target) if last_t is None else last_t + pd.Timedelta(BAR)
+                while t <= pd.Timestamp(target):
+                    await self.safe(self.process_candle(t), "candle")
+                    t += pd.Timedelta(BAR)
+            elif lag <= timedelta(minutes=self.settings.max_signal_latency_minutes):
+                await self.safe(self.process_candle(pd.Timestamp(target)), "candle")
+            else:
+                await self.event("warning", "candle.skipped",
+                                 f"skipped evaluation of {target:%Y-%m-%d %H:%M} (engine was {lag} late)")
+                await self.set_last_eval(pd.Timestamp(target), skipped=True)
+        return current + BAR + timedelta(seconds=self.settings.eval_delay_seconds)
 
     async def process_candle(self, t: pd.Timestamp) -> None:
         started = time.monotonic()

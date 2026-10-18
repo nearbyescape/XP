@@ -65,7 +65,7 @@ export function PositionCalculator({ entry, stop, target, targets, defaultRisk =
 
   return (
     <div className={compact ? "space-y-4" : "grid gap-6 lg:grid-cols-2"}>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-2 content-start gap-3">
         {field("Account size", account, setAccount, "USDT")}
         {field("Risk per signal", risk, setRisk, "%")}
         {field("Entry", e, setE)}

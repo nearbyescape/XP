@@ -72,3 +72,33 @@ async def test_market_outage_alerts_admins_once_then_recovery(tmp_path, monkeypa
     assert "unreachable" in alerts[0].text and "ConnectError" in alerts[0].text
     assert "reachable again" in alerts[1].text
     assert prices is None
+
+
+async def test_candle_loop_survives_a_database_outage(tmp_path):
+    db.configure(f"sqlite+aiosqlite:///{tmp_path}/outage.db")
+    await db.create_all()
+    settings = Settings(telegram_bot_token="TOKEN", telegram_admin_chat_ids="42", environment="test",
+                        universe="BTCUSDT")
+    client = TelegramClient("TOKEN", http=httpx.AsyncClient(transport=httpx.MockTransport(
+        lambda r: httpx.Response(200, json={"ok": True, "result": {"message_id": 1}}))))
+    clock = FastClock()
+    engine = Engine(settings, FlakyMarket(), clock, model=None, telegram=TelegramService(settings, clock, client))
+    ticks = 0
+
+    async def tick():
+        nonlocal ticks
+        ticks += 1
+        if ticks == 1:
+            raise OSError("[Errno -3] Temporary failure in name resolution")
+        raise asyncio.CancelledError  # the loop came back for another tick instead of exiting
+
+    engine.candle_tick = tick
+    try:
+        await engine.candle_loop()
+    except asyncio.CancelledError:
+        pass
+    assert ticks == 2
+    async with db.sessions()() as s:
+        kinds = (await s.scalars(select(EngineEvent.kind))).all()
+        alerts = (await s.scalars(select(TelegramOutbox).where(TelegramOutbox.kind == "alert"))).all()
+    assert "candle.error" in kinds and "name resolution" in alerts[0].text

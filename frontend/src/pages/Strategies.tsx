@@ -26,7 +26,7 @@ function ExitPlan({ s, b }: { s: StrategyMeta; b: Benchmark }) {
           <div key={i} className="bg-surface p-5">
             <div className="flex items-baseline justify-between">
               <span className="text-lg font-semibold">TP{i + 1}</span>
-              <span className="num text-sm text-muted">{k} × ATR</span>
+              <span className="num text-sm text-muted">{num(k, 1)} × ATR</span>
             </div>
             <div className="num mt-3 text-3xl font-semibold">{num(s.target_sizes[i] * 100, 0)}%</div>
             <div className="text-xs text-muted">of the position closed</div>
