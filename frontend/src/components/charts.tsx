@@ -85,13 +85,16 @@ export function SignalChart({ candles, signal, theme }: { candles: Candle[]; sig
       },
     ];
     const candleOf = (iso: string) => (Math.floor((new Date(iso).getTime() - 1) / 1000 / 14400) * 14400) as UTCTimestamp;
+    const steps: SeriesMarker<Time>[] = [];
     for (const t of signal.targets) {
       if (!t.hit_at || (multi && t.n === signal.targets.length) || !multi) continue;  // the last one is the exit marker
-      markers.push({ time: candleOf(t.hit_at), position: signal.side === "LONG" ? "aboveBar" : "belowBar", color: cssColor("long"), shape: "circle", text: `TP${t.n}` });
+      steps.push({ time: candleOf(t.hit_at), position: "aboveBar", color: cssColor("long"), shape: "circle", text: `TP${t.n}` });
     }
     if (signal.exit_at) {
-      const label = signal.exit_reason === "TP" ? (multi ? `TP${signal.targets.length}` : "TP") : signal.exit_reason ?? "";
-      markers.push({
+      const reached = signal.targets_hit ? `TP${signal.targets_hit} · ` : "";
+      const label = signal.exit_reason === "TP" ? (multi ? `TP${signal.targets.length}` : "TP")
+        : signal.exit_reason === "SL" ? "SL" : `${reached}${signal.exit_reason ?? ""}`;
+      steps.push({
         time: candleOf(signal.exit_at),
         position: "aboveBar",
         color: signal.exit_reason === "TP" || signal.exit_reason === "BE" ? cssColor("long") : signal.exit_reason === "SL" ? cssColor("short") : cssColor("warn"),
@@ -99,7 +102,12 @@ export function SignalChart({ candles, signal, theme }: { candles: Candle[]; sig
         text: label,
       });
     }
-    createSeriesMarkers(series, markers.sort((a, b) => Number(a.time) - Number(b.time)));
+    // Steps a few candles apart would print their labels on top of each other: keep the dot, and let
+    // the later label speak (it names the furthest target reached); the timeline lists every step.
+    steps.forEach((m, i) => {
+      if (i + 1 < steps.length && Number(steps[i + 1].time) - Number(m.time) <= 3 * 14400) m.text = "";
+    });
+    createSeriesMarkers(series, [...markers, ...steps].sort((a, b) => Number(a.time) - Number(b.time)));
     const sigT = new Date(signal.signal_open_at).getTime() / 1000;
     const idx = candles.findIndex((k) => k.t >= sigT);
     if (idx >= 0) c.timeScale().setVisibleLogicalRange({ from: Math.max(0, idx - 60), to: Math.min(candles.length + 4, idx + 70) });
