@@ -42,10 +42,19 @@ git clone <repo> signaldesk && cd signaldesk
 cp .env.example .env
 openssl rand -hex 32                     # paste into SECRET_KEY
 openssl rand -base64 24                  # paste into POSTGRES_PASSWORD
-nano .env                                # ADMIN_PASSWORD, PUBLIC_BASE_URL, Telegram (section 3)
-docker compose up -d --build
+nano .env                                # ADMIN_PASSWORD, PUBLIC_BASE_URL, APP_NAME, Telegram (section 3)
+docker compose build
+docker compose run --rm engine python -m app.cli preflight --send   # must end with READY
+docker compose up -d
 docker compose logs -f engine            # first start downloads ~9 years of 4H candles (2–4 min)
 ```
+
+**Preflight** checks, on the server itself, everything that cannot be tested anywhere else: the
+`.env` secrets, the database and its migrations, the ML model, Binance futures from this server
+(location, candles for every market, the server clock against Binance), the bot token, the bot's
+admin rights in the channel, and each admin chat (`--send` puts a test message there, never in the
+channel). It prints PASS / WARN / FAIL with what to do and exits with 1 on any failure. Run it
+again after every change to `.env`.
 
 Open `http://<server>:8080` for the dashboard and `http://<server>:8080/admin` for the admin console.
 
@@ -72,9 +81,9 @@ Keep `COOKIE_SECURE=true` behind HTTPS. Set it to `false` only to test the admin
    - The command list (`/signals`, `/stats`, `/regime`, `/rules`, `/help`) is registered
      automatically by the engine.
 3. Create a **channel** (public or private) for the signal feed.
-   - Channel settings → *Administrators* → add your bot with **Post messages**, **Edit messages
-     of others** and **Pin messages**. Edit rights are how the engine stamps each signal with its
-     final result; the pin right lets the admin console pin the member rules (§5).
+   - Channel settings → *Administrators* → add your bot with **Post messages** and **Edit messages
+     of others**. Edit rights are how the engine stamps each signal with its final result; in a
+     channel they also let the bot pin the member rules (§5). (In a group, also give **Pin messages**.)
 4. Set the channel in `.env`:
    - Public channel: `TELEGRAM_CHANNEL_ID=@yourchannel`
    - Private channel: the numeric id, e.g. `-1001234567890`. To find it, post any message in the
@@ -201,6 +210,7 @@ they were tuned on. Instead:
 | Task | Command |
 |---|---|
 | Status | `docker compose ps` (engine, api and web report *healthy*) · `docker compose exec engine python -m app.cli status` · `/status` to the bot |
+| Launch checks | `docker compose exec engine python -m app.cli preflight` (after any `.env` change: `docker compose up -d` first) |
 | Logs (JSON) | `docker compose logs -f engine api` |
 | Health | `curl -s http://127.0.0.1:8080/api/health` (`engine_alive` turns false if the engine misses heartbeats for 90 s) |
 | Update | `git pull && docker compose up -d --build` (migrations run automatically) |

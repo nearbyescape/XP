@@ -212,7 +212,7 @@ function Telegram({ ov }: { ov: AdminOverview }) {
         {test.isSuccess && <p className="text-xs text-long">Queued for {test.data.chat_id}. Delivered by the engine within a few seconds.</p>}
         {test.error && <p className="text-xs text-short">{(test.error as Error).message}</p>}
         <div className="flex items-center justify-between gap-3 border-t border-line pt-4">
-          <p className="text-xs text-muted">Member rules: posted in the channel and pinned (the bot needs the “Pin messages” right).</p>
+          <p className="text-xs text-muted">Member rules: posted in the channel and pinned (in a channel the bot's “Edit messages of others” right allows pinning).</p>
           <button className="btn shrink-0" disabled={!t.enabled || !t.channel_id || rules.isPending} onClick={() => rules.mutate()}><Pin size={14} /> Post &amp; pin rules</button>
         </div>
         {rules.isSuccess && <p className="text-xs text-long">Rules queued for {rules.data.chat_id}.</p>}

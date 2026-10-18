@@ -201,8 +201,8 @@ class TelegramService:
             row.error = f"posted, not pinned: {exc}"[:500]
             await self.enqueue_admin(s, fmt.alert(
                 self.settings.app_name, "warning", "telegram.pin",
-                f"Rules posted in {row.chat_id} but not pinned ({exc}). Give the bot the 'Pin messages' "
-                "right in the channel's admin settings, or pin the message by hand."))
+                f"Rules posted in {row.chat_id} but not pinned ({exc}). In a channel the bot needs 'Edit "
+                "messages of others' to pin (in a group: 'Pin messages'); or pin the message by hand."))
 
     async def sender_loop(self) -> None:
         while True:

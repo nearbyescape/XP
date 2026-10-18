@@ -208,4 +208,4 @@ async def test_rules_are_posted_and_pinned(guarded, monkeypatch):
         row = (await s.scalars(select(TelegramOutbox).where(TelegramOutbox.kind == "rules")
                                .order_by(TelegramOutbox.id.desc()))).first()
         assert row.status == "sent" and row.error.startswith("posted, not pinned")
-        assert "Pin messages" in (await alerts(s))[-1]
+        assert "Edit messages of others" in (await alerts(s))[-1]

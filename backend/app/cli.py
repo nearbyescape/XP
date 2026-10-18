@@ -4,6 +4,7 @@
     python -m app.cli backfill-ledger --since 2026-01-01           # replay strategies into the ledger
     python -m app.cli telegram-test [--chat @channel]              # send a test message now
     python -m app.cli status                                       # engine / strategy summary
+    python -m app.cli preflight [--send]                           # launch checks (exit 1 on failure)
 """
 
 from __future__ import annotations
@@ -120,6 +121,14 @@ async def status() -> None:
     print(json.dumps(out, indent=2, default=str))
 
 
+async def preflight(send: bool) -> None:
+    from . import preflight as pf
+
+    code = pf.report(await pf.run(get_settings(), send=send))
+    if code:
+        raise SystemExit(code)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(prog="python -m app.cli")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -131,6 +140,8 @@ def main() -> None:
     p = sub.add_parser("telegram-test")
     p.add_argument("--chat")
     sub.add_parser("status")
+    p = sub.add_parser("preflight", help="check config, database, model, Binance and Telegram before launch")
+    p.add_argument("--send", action="store_true", help="also send a test message to each admin chat")
     sub.add_parser("create-tables", help="SQLite/dev only; production uses `alembic upgrade head`")
     args = ap.parse_args()
 
@@ -142,6 +153,7 @@ def main() -> None:
         "backfill-ledger": lambda: backfill_ledger(args.since, args.until),
         "telegram-test": lambda: telegram_test(args.chat),
         "status": status,
+        "preflight": lambda: preflight(args.send),
         "create-tables": db.create_all,
     }[args.cmd]()
     asyncio.run(coro)

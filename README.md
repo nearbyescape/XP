@@ -35,7 +35,9 @@ pause all new signals at once ([deployment §5](docs/deployment.md#5-strategy-co
 
 ```bash
 cp .env.example .env        # set POSTGRES_PASSWORD, SECRET_KEY, ADMIN_PASSWORD, Telegram
-docker compose up -d --build
+docker compose build
+docker compose run --rm engine python -m app.cli preflight --send   # launch checks: must end with READY
+docker compose up -d
 open http://localhost:8080
 ```
 
