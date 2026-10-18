@@ -46,7 +46,7 @@ async def review_strategy(s, code: str, settings: Settings, telegram, now: datet
             await repo.log_event(s, "warning", "strategy.paused", f"{code} auto-paused: {st.pause_reason}")
             if telegram:
                 await telegram.enqueue_notice(
-                    s, f"⏸ <b>{code} paused</b> — rolling performance dropped below its safety limits. "
+                    s, f"⏸️ <b>{code} paused</b> — rolling performance dropped below its safety limits. "
                        f"It keeps running in paper mode and resumes automatically after recovering.")
                 await telegram.enqueue_admin(s, fmt.alert(settings.app_name, "warning", "strategy.paused",
                                                           f"{code} auto-paused: {st.pause_reason}"))

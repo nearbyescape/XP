@@ -9,7 +9,7 @@ from ..core.catalog import STRATEGIES
 from ..models import Signal
 
 TREND = {1: "▲", -1: "▼", 0: "▬"}
-OUTCOME = {"TP": ("✅", "Target hit"), "SL": ("🛑", "Stop hit"), "TIME": ("⏱", "Time exit")}
+OUTCOME = {"TP": ("✅", "Target hit"), "SL": ("🛑", "Stop hit"), "TIME": ("⏱️", "Time exit")}
 
 
 def price(x: float | None) -> str:
@@ -69,8 +69,8 @@ def new_signal(sig: Signal, risk_pct: float) -> str:
     notional = min(20.0, risk_pct / (sl_pct * 100) * 100) if sl_pct else 0.0
     bench = spec.benchmark
     lines = [
-        f"{'🟢' if long else '🔴'} <b>{'LONG' if long else 'SHORT'} · {escape(pair(sig.symbol))}</b>"
-        f"  ·  {escape(spec.name)} <code>{spec.code}</code>",
+        f"{'🟢' if long else '🔴'} <b>{'LONG' if long else 'SHORT'} · {escape(pair(sig.symbol))}</b>",
+        f"{escape(spec.name)} · <code>{spec.code}</code>",
         "",
         f"Entry    <code>{price(sig.entry_price)}</code>   4H open {sig.entry_at:%H:%M} UTC",
         f"Target   <code>{price(sig.take_profit)}</code>   +{tp_pct * 100:.2f}%  · limit",
