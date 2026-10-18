@@ -71,6 +71,22 @@ buffering for `/api/stream` (Server-Sent Events).
 
 Keep `COOKIE_SECURE=true` behind HTTPS. Set it to `false` only to test the admin console over plain HTTP.
 
+**Launch day, in order**
+
+1. Server in a region Binance serves (Mumbai, Singapore, the EU; not the US), clock synced (NTP).
+2. Bot from @BotFather; channel with the bot as admin (*Post messages*, *Edit messages of others*);
+   from your own account press **Start** on the bot and send `/id` → `TELEGRAM_ADMIN_CHAT_IDS`.
+3. `.env` filled in (secrets, `APP_NAME`, `PUBLIC_BASE_URL`, `TELEGRAM_*`), HTTPS set up (below).
+4. `docker compose build && docker compose run --rm engine python -m app.cli preflight --send`:
+   fix every FAIL until it prints **READY** and the test message reaches your admin chat.
+5. `docker compose up -d` (or `--profile tls`). The admin console shows the engine *running* on
+   Binance Futures once the history download finishes (2–4 min); the bot sends *engine.start*.
+6. Admin console → Telegram → **Test** (a message in the channel), then **Post & pin rules**.
+7. At the next in-session 4H check (09:30, 13:30, 17:30, 21:30 IST) signals appear in the channel
+   and on the website; the 23:00 summary and the 09:00 greeting follow. Keep the admin chat open:
+   errors, outages and risk warnings arrive there, and `/status` answers at any time.
+8. The next day: `ls backups/` shows the first dump; copy it off the server.
+
 ## 3. Telegram with @BotFather
 
 1. In Telegram, open **@BotFather** → `/newbot` → choose a name and a username ending in `bot`.
