@@ -1,6 +1,6 @@
 import type { Signal } from "./types";
 
-// Number and time formatting. All timestamps are shown in UTC: signals live on the 4h UTC grid.
+// Number and time formatting. Times are shown in the publishing session's timezone (e.g. IST), set from /api/meta.
 
 export function price(x: number | null | undefined): string {
   if (x === null || x === undefined || Number.isNaN(x)) return "—";
@@ -52,20 +52,39 @@ export function base(symbol: string): string {
   return symbol.endsWith("USDT") ? symbol.slice(0, -4) : symbol;
 }
 
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const pad = (n: number) => String(n).padStart(2, "0");
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-export function utc(ts: string | number | Date | null | undefined, withYear = false): string {
-  if (!ts) return "—";
-  const d = new Date(ts);
-  const date = `${pad(d.getUTCDate())} ${MONTHS[d.getUTCMonth()]}${withYear ? ` ${d.getUTCFullYear()}` : ""}`;
-  return `${date} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+let TZ = "UTC";
+let TZ_ABBR = "UTC";
+let FMT = new Intl.DateTimeFormat("en-GB", { timeZone: TZ, day: "2-digit", month: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+
+/** Display timezone for every time on the site (the session timezone from /api/meta). */
+export function setTimeZone(tz: string, abbr: string) {
+  if (tz === TZ) return;
+  TZ = tz;
+  TZ_ABBR = abbr;
+  FMT = new Intl.DateTimeFormat("en-GB", { timeZone: tz, day: "2-digit", month: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
 }
 
-export function utcDate(ts: string | null | undefined): string {
+export const tz = () => TZ_ABBR;
+
+function parts(ts: string | number | Date) {
+  const p = Object.fromEntries(FMT.formatToParts(new Date(ts)).map((x) => [x.type, x.value]));
+  return { day: p.day, month: MONTHS[Number(p.month) - 1], year: p.year, hour: p.hour, minute: p.minute };
+}
+
+/** "18 Oct 09:30" (or "18 Oct 2026 09:30") in the display timezone. */
+export function stamp(ts: string | number | Date | null | undefined, withYear = false): string {
   if (!ts) return "—";
-  const d = new Date(ts);
-  return `${pad(d.getUTCDate())} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+  const p = parts(ts);
+  return `${p.day} ${p.month}${withYear ? ` ${p.year}` : ""} ${p.hour}:${p.minute}`;
+}
+
+export function stampDate(ts: string | null | undefined): string {
+  if (!ts) return "—";
+  const p = parts(ts);
+  return `${p.day} ${p.month} ${p.year}`;
 }
 
 export function duration(seconds: number): string {

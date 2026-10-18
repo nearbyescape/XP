@@ -44,10 +44,7 @@ async def review_strategy(s, code: str, settings: Settings, telegram, now: datet
                                f"(min {settings.kill_switch_min_win_rate * 100:.0f}%), profit factor "
                                f"{pf:.2f} (min {settings.kill_switch_min_profit_factor:.2f})")
             await repo.log_event(s, "warning", "strategy.paused", f"{code} auto-paused: {st.pause_reason}")
-            if telegram:
-                await telegram.enqueue_notice(
-                    s, f"⏸️ <b>{code} paused</b> — rolling performance dropped below its safety limits. "
-                       f"It keeps running in paper mode and resumes automatically after recovering.")
+            if telegram:  # admins only: the channel carries signals and session messages
                 await telegram.enqueue_admin(s, fmt.alert(settings.app_name, "warning", "strategy.paused",
                                                           f"{code} auto-paused: {st.pause_reason}"))
             log.warning("%s auto-paused: %s", code, st.pause_reason)
@@ -63,7 +60,6 @@ async def review_strategy(s, code: str, settings: Settings, telegram, now: datet
         await repo.log_event(s, "info", "strategy.resumed",
                              f"{code} resumed after {h['signals']} paper signals (PF {h['profit_factor']:.2f})")
         if telegram:
-            await telegram.enqueue_notice(s, f"▶️ <b>{code} resumed</b> after recovering in paper mode.")
             await telegram.enqueue_admin(s, fmt.alert(settings.app_name, "info", "strategy.resumed",
                                                       f"{code} resumed after {h['signals']} paper signals "
                                                       f"(PF {h['profit_factor']:.2f})"))

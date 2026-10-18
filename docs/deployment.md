@@ -86,16 +86,26 @@ Keep `COOKIE_SECURE=true` behind HTTPS. Set it to `false` only to test the admin
    - from the admin console → *Telegram → Test*, or
    - `docker compose exec engine python -m app.cli telegram-test`.
 
-What gets sent:
+**Publishing session.** Signals are published during the session, 09:00 AM to 11:00 PM IST by
+default (`SESSION_TZ`, `SESSION_START`, `SESSION_END`): the 4H candles closing at 09:30, 13:30,
+17:30 and 21:30 IST. Candles closing at 01:30 and 05:30 IST are still evaluated and tracked, but
+not published, so the record stays identical to the validated strategies. Over 2022–26 this
+published about 2.1 signals a day (about 780 a year) with the same 89% win rate.
 
-| Event | Channel | Subscribers (DM) |
+What gets sent to the channel (nothing else):
+
+| Message | When | Sound |
 |---|---|---|
-| New signal: entry, TP1 / TP2 / TP3 (limits for 50 / 30 / 20%), stop, expiry, risk-based size, regime, backtest reference, "Open signal" button | ✓ | ✓ |
-| Target hit (TP1, TP2): reply with the part closed and its price; after TP1 "move the stop to entry"; the original is stamped with the progress | ✓ | ✓ |
-| Signal closed: reply with the outcome (all targets, TPn then entry, stop, time), net %, R and holding time; the original is edited with the result | ✓ | ✓ |
-| Daily summary at 00:05 UTC (yesterday's results + 30-day stats) | ✓ | |
-| Strategy auto-paused / resumed by the kill switch | ✓ | |
-| Ops alerts (see below) | | admins only |
+| Session start: market trend, today's signal checks, open signals, overnight recap, 30-day stats | 09:00 IST | yes |
+| New signal: symbol and side, setup, entry, stop loss, TP1 / TP2 / TP3 with the share closed at each, "after TP1 move the stop to entry", entry window (15 min), "Open signal" button | at a 4H close in the session | yes |
+| TP1 / TP2 hit: reply to the signal with the price and the share closed | as it happens | yes in the session, silent at night |
+| Signal closed (TP3, SL, stop at entry, time limit): reply with the result | as it happens | yes in the session, silent at night |
+| Session end: signals of the day, TP1/TP2/TP3/SL hits, closed signals with results, positions open overnight, 30-day stats | 11:00 PM IST | yes |
+
+The original signal post is also edited with its progress and final result; edits never notify.
+Kill-switch pauses and ops alerts go to admins only (below). Set `TELEGRAM_DM_ENABLED=true` to also
+deliver signals to users who start the bot in a private chat; by default the bot only answers
+commands there (`/signals`, `/stats`, `/regime`).
 
 **Ops alerts for you.** Press Start on your bot, send `/id`, and put the number it replies with in
 `TELEGRAM_ADMIN_CHAT_IDS` (comma-separate several admins). Those chats then receive:

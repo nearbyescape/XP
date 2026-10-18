@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { KeyRound, LogOut, Play, RefreshCw, Send, ShieldCheck } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { api, ApiError } from "@/lib/api";
-import { ago, duration, num, utc } from "@/lib/format";
+import { ago, duration, num, stamp, tz } from "@/lib/format";
 import type { AdminOverview, Mode } from "@/lib/types";
 import { Badge, Card, CardHeader, Dot, Empty, Select, Skeleton } from "@/components/ui";
 import { StrategyChip } from "@/components/bits";
@@ -46,8 +46,8 @@ function Health({ ov }: { ov: AdminOverview }) {
   const items: [string, React.ReactNode][] = [
     ["Engine", <span className="inline-flex items-center gap-2"><Dot tone={e.alive ? "long" : "short"} pulse={e.alive} />{e.alive ? "running" : "offline"}{e.heartbeat_age_s !== null ? ` · ${num(e.heartbeat_age_s, 0)}s ago` : ""}</span>],
     ["Data source", `${e.source ?? "—"}${e.simulated ? " (simulated clock)" : ""} · tracking ${e.fine_interval ?? "—"}`],
-    ["Engine clock", e.clock ? `${utc(e.clock, true)} UTC` : "—"],
-    ["Last evaluation", ov.last_eval?.candle ? `${utc(ov.last_eval.candle)} candle · ${ov.last_eval.skipped ? "skipped" : `${ov.last_eval.signals ?? 0} signal(s)`}` : "—"],
+    ["Engine clock", e.clock ? `${stamp(e.clock, true)} ${tz()}` : "—"],
+    ["Last evaluation", ov.last_eval?.candle ? `${stamp(ov.last_eval.candle)} candle · ${ov.last_eval.skipped ? "skipped" : `${ov.last_eval.signals ?? 0} signal(s)`}` : "—"],
     ["Model", e.model ? `${e.model} · threshold ${num(e.model_threshold ?? null, 3)}` : "not loaded"],
     ["Uptime", e.uptime_s ? duration(e.uptime_s) : "—"],
     ["Version", e.version ?? "—"],

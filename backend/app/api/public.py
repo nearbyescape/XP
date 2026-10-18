@@ -16,6 +16,7 @@ from .. import __version__
 from ..config import Settings, get_settings
 from ..core import stats
 from ..core.catalog import BAR_SECONDS, BOOK_BENCHMARK, INTERVAL, STRATEGIES
+from ..core.session import Session
 from ..db import get_session
 from ..market.base import floor_time
 from ..models import Candle, Signal
@@ -51,6 +52,10 @@ async def meta(s: AsyncSession = Depends(get_session), settings: Settings = Depe
     alive, age = heartbeat_alive(hb)
     clock = datetime.fromisoformat(hb["clock"]) if hb.get("clock") else datetime.now(timezone.utc)
     next_close = floor_time(clock, INTERVAL) + timedelta(seconds=BAR_SECONDS)
+    ses = Session.from_settings(settings)
+    next_check = next_close
+    while not ses.contains(next_check):  # the next 4H close that publishes
+        next_check += timedelta(seconds=BAR_SECONDS)
     strategies = []
     for code, spec in STRATEGIES.items():
         st = states.get(code)
@@ -72,6 +77,10 @@ async def meta(s: AsyncSession = Depends(get_session), settings: Settings = Depe
         "telegram": {"enabled": settings.telegram_enabled, "channel_url": settings.telegram_channel_url,
                      "bot_username": tg.get("bot")},
         "default_risk_pct": settings.default_risk_pct,
+        "session": {"tz": settings.session_tz, "tz_abbr": ses.tzname(clock), "start": settings.session_start,
+                    "end": settings.session_end, "open": ses.contains(clock), "next_open": ses.next_start(clock),
+                    "next_close": ses.next_end(clock), "next_check": next_check,
+                    "checks": [ses.label(t, with_date=False) for t in ses.checks(ses.local(clock).date())]},
         "costs": {"entry": settings.cost_entry, "tp": settings.cost_tp, "exit": settings.cost_exit},
         "server_time": datetime.now(timezone.utc), "clock": clock, "next_candle_close": next_close,
         "last_eval": last_eval, "engine": {"alive": alive, "heartbeat_age_s": age},

@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from functools import lru_cache
 from typing import Literal
+from zoneinfo import ZoneInfo
 
 from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -26,8 +27,9 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://signals:signals@db:5432/signals"
 
     # --- market data ------------------------------------------------------------------------
-    # binance_spot is the default because every strategy was validated on Binance spot candles.
-    market_data_source: Literal["binance_spot", "binance_futures", "replay"] = "binance_spot"
+    # USDT-M futures by default: subscribers trade the perpetuals. The strategies were validated on
+    # Binance spot candles, which the perpetuals track within a few basis points.
+    market_data_source: Literal["binance_spot", "binance_futures", "replay"] = "binance_futures"
     binance_spot_urls: str = "https://data-api.binance.vision,https://api.binance.com,https://api1.binance.com"
     binance_futures_urls: str = "https://fapi.binance.com"
     universe: str = DEFAULT_UNIVERSE
@@ -59,11 +61,20 @@ class Settings(BaseSettings):
     telegram_bot_token: SecretStr | None = None
     telegram_channel_id: str | None = None      # "@channel" or "-100…"; bot must be a channel admin
     telegram_channel_url: str | None = None     # public invite link shown on the website
-    telegram_dm_enabled: bool = True            # subscribers get signals in a private chat
-    telegram_daily_digest: bool = True
+    telegram_dm_enabled: bool = False           # also deliver signals to users who /start the bot
+    telegram_session_messages: bool = True      # greeting at session start, summary at session end
     telegram_api_base: str = "https://api.telegram.org"
     # private chat ids (comma-separated) that receive ops alerts and may use /status; send /id to the bot
     telegram_admin_chat_ids: str = ""
+
+    # --- publishing session ------------------------------------------------------------------
+    # Signals whose 4H candle closes inside the session are published; the others are tracked
+    # unpublished. Target / stop updates outside the session are sent without sound.
+    session_tz: str = "Asia/Kolkata"
+    session_start: str = "09:00"
+    session_end: str = "23:00"
+    entry_window_minutes: int = 15
+    overnight_updates: Literal["silent", "loud"] = "silent"
 
     # --- security ---------------------------------------------------------------------------
     admin_username: str = "admin"
@@ -73,6 +84,18 @@ class Settings(BaseSettings):
     cookie_secure: bool = True
     # false (default) | deindex | true — mirrors the nginx policy; anything but "true" adds noindex
     search_indexing: Literal["false", "deindex", "true"] = "false"
+
+    @field_validator("session_start", "session_end")
+    @classmethod
+    def _hhmm(cls, v: str) -> str:
+        datetime.strptime(v, "%H:%M")
+        return v
+
+    @field_validator("session_tz")
+    @classmethod
+    def _tz(cls, v: str) -> str:
+        ZoneInfo(v)
+        return v
 
     @field_validator("backfill_from", "replay_start", mode="after")
     @classmethod

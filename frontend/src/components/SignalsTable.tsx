@@ -2,7 +2,7 @@ import clsx from "clsx";
 import { ChevronRight, Clock3 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import type { Signal } from "@/lib/types";
-import { duration, pair, positionReturn, price, r, utc } from "@/lib/format";
+import { duration, pair, positionReturn, price, r, stamp, tz } from "@/lib/format";
 import { useMeta, usePrices } from "@/lib/queries";
 import { useLive } from "@/lib/live";
 import { LevelBar, OutcomeBadge, PnL, SideBadge, StrategyChip, TargetPips, useNow } from "./bits";
@@ -121,7 +121,7 @@ export function HistoryTable({ rows, loading }: { rows: Signal[]; loading?: bool
           <div className="w-[72px] shrink-0"><Coin symbol={s.symbol} compact /></div>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5"><SideBadge side={s.side} /><OutcomeBadge reason={s.exit_reason} pnl={s.pnl_net_pct} hits={s.targets_hit} total={s.targets.length} /></div>
-            <div className="num mt-1 truncate text-2xs text-faint">{utc(s.entry_at)} · {s.strategy}</div>
+            <div className="num mt-1 truncate text-2xs text-faint">{stamp(s.entry_at)} · {s.strategy}</div>
           </div>
           <div className="text-right">
             <PnL value={s.status === "CLOSED" ? s.pnl_net_pct : s.unrealized_pct} className="text-sm" />
@@ -136,7 +136,7 @@ export function HistoryTable({ rows, loading }: { rows: Signal[]; loading?: bool
           <tr className="table-head">
             <th className="px-4 py-2.5 sm:px-5">Market</th>
             <th className="px-3 py-2.5">Strategy</th>
-            <th className="px-3 py-2.5">Opened (UTC)</th>
+            <th className="px-3 py-2.5">Opened ({tz()})</th>
             <th className="px-3 py-2.5 text-right">Entry</th>
             <th className="px-3 py-2.5 text-right">Exit</th>
             <th className="px-3 py-2.5">Outcome</th>
@@ -157,7 +157,7 @@ export function HistoryTable({ rows, loading }: { rows: Signal[]; loading?: bool
                   </div>
                 </td>
                 <td className="px-3 py-3"><StrategyChip code={s.strategy} /></td>
-                <td className="num px-3 py-3 text-muted">{utc(s.entry_at)}</td>
+                <td className="num px-3 py-3 text-muted">{stamp(s.entry_at)}</td>
                 <td className="num px-3 py-3 text-right text-muted">{price(s.entry_price)}</td>
                 <td className="num px-3 py-3 text-right">{s.status === "CLOSED" ? price(s.exit_price) : "—"}</td>
                 <td className="px-3 py-3"><OutcomeBadge reason={s.exit_reason} pnl={s.pnl_net_pct} hits={s.targets_hit} total={s.targets.length} /></td>

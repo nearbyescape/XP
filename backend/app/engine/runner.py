@@ -5,7 +5,7 @@ Loops (all asyncio, one process):
   tracker  - every minute: walk open signals through closed 1m candles (TP / SL / time exits)
   prices   - every 15 s: last prices for the dashboard
   heartbeat- every 15 s: liveness for the API / admin console
-  telegram - outbox sender, bot commands (long polling), daily digest
+  telegram - outbox sender, bot commands (long polling), session greeting and summary
 """
 
 from __future__ import annotations
@@ -26,6 +26,7 @@ from ..core.evaluate import Candidate, evaluate_candle, regime_snapshot
 from ..core.lifecycle import Bar, Costs, pnl, step
 from ..core.ml import MLModel
 from ..core.replay import new_trade
+from ..core.session import Session
 from ..market.base import MarketData, floor_time
 from ..models import Signal, utcnow
 from ..services import repo
@@ -55,6 +56,7 @@ class Engine:
         self.frames: dict[str, pd.DataFrame] = {}
         self.current_open: dict[str, tuple[datetime, float]] = {}
         self.origin = "demo" if clock.simulated else "live"
+        self.session = Session.from_settings(settings)
         self.started = time.time()
 
     # ------------------------------------------------------------------ bootstrap
@@ -204,7 +206,9 @@ class Engine:
             cur = (kl[0].open_time, kl[0].open)
         entry = float(cur[1])
         st = new_trade(c, entry, entry_at)
-        published = state.mode == "live" and not state.auto_paused
+        # publish only signals whose candle closes inside the session; the others are tracked
+        in_session = self.session.contains(entry_at)
+        published = state.mode == "live" and not state.auto_paused and in_session
         uid = f"{c.strategy}:{c.symbol}:{c.signal_open:%Y-%m-%dT%H:%MZ}"
         async with db.sessions()() as s:
             if await s.scalar(select(Signal.id).where(Signal.uid == uid)):
@@ -218,7 +222,8 @@ class Engine:
                 atr=c.atr, tp_atr=c.tp_atr, sl_atr=c.sl_atr, max_bars=c.max_bars,
                 regime_coin=c.regime_coin, regime_btc=c.regime_btc, model_prob=c.model_prob,
                 model_version=self.model.version if (c.model_prob is not None and self.model) else None,
-                mode="live" if published else ("shadow" if state.mode != "live" else "paused"),
+                mode="live" if published else ("shadow" if state.mode != "live"
+                                               else "paused" if state.auto_paused else "offhours"),
                 published=published, status="ACTIVE", last_price=entry, mfe=0.0, mae=0.0,
             )
             s.add(sig)
@@ -286,7 +291,7 @@ class Engine:
                                      f"{row.strategy} {row.symbol} {st.exit_reason} net {res['net'] * 100:+.2f}% "
                                      f"({res['r']:+.2f}R)", {"signal_id": row.id})
                 if self.telegram:
-                    await self.telegram.enqueue_signal_close(s, row)
+                    await self.telegram.enqueue_signal_close(s, row, hit_before)
                 await s.commit()
                 await review_strategy(s, row.strategy, self.settings, self.telegram, self.clock.now())
                 await s.commit()
@@ -388,6 +393,6 @@ class Engine:
         tasks = [self.candle_loop(), self.tracker_loop(), self.price_loop(), self.heartbeat_loop()]
         if self.telegram and self.telegram.enabled:
             tasks += [self.telegram.sender_loop(), self.telegram.updates_loop()]
-            if self.settings.telegram_daily_digest:
-                tasks.append(self.telegram.digest_loop())
+            if self.settings.telegram_session_messages:
+                tasks.append(self.telegram.session_loop())
         await asyncio.gather(*tasks)

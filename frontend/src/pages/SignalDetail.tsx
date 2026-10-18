@@ -5,7 +5,7 @@ import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useLivePrice, useMeta } from "@/lib/queries";
-import { duration, num, pair, pct, positionReturn, price, r, utc } from "@/lib/format";
+import { duration, num, pair, pct, positionReturn, price, r, stamp, tz } from "@/lib/format";
 import { useTheme } from "@/lib/theme";
 import { Badge, Card, CardHeader, Empty, Skeleton, Stat } from "@/components/ui";
 import { LevelBar, OutcomeBadge, PnL, SideBadge, StrategyChip, TargetPips, Trend, useNow } from "@/components/bits";
@@ -48,7 +48,7 @@ function Timeline({ s }: { s: Signal }) {
         <li key={i} className="mb-5 ml-5 last:mb-0">
           <span className={`absolute -left-[5px] mt-1.5 h-2.5 w-2.5 rounded-full ${it.pending ? "bg-faint" : "bg-accent"}`} />
           <div className="text-sm font-medium">{it.label}</div>
-          <div className="num text-xs text-faint">{utc(it.t, true)} UTC</div>
+          <div className="num text-xs text-faint">{stamp(it.t, true)} {tz()}</div>
           <div className="text-xs text-muted">{it.note}</div>
         </li>
       ))}
@@ -72,7 +72,7 @@ function Targets({ s }: { s: Signal }) {
             <div className="num mt-1.5 text-lg font-semibold text-long">{price(t.price)}</div>
             <div className="num text-xs text-muted">{pct(t.pct)} · {num(s.atr ? Math.abs(t.price - s.entry_price) / s.atr : 0, 2)} ATR</div>
             <div className="num mt-2 text-2xs text-faint">
-              {hit ? `hit ${utc(t.hit_at, true)} UTC${t.fill_price !== null && Math.abs(t.fill_price - t.price) > 1e-12 ? ` · filled ${price(t.fill_price)}` : ""}` : closed ? "not reached" : "pending"}
+              {hit ? `hit ${stamp(t.hit_at, true)} ${tz()}${t.fill_price !== null && Math.abs(t.fill_price - t.price) > 1e-12 ? ` · filled ${price(t.fill_price)}` : ""}` : closed ? "not reached" : "pending"}
             </div>
           </div>
         );
@@ -106,7 +106,7 @@ export default function SignalDetail() {
   const multi = s.targets.length > 1;
   const riskFree = s.breakeven && s.targets_hit > 0;
   const tps = multi ? s.targets.map((t) => `TP${t.n} ${price(t.price)} (${num(t.size_pct, 0)}%)`).join(" ") : `TP ${price(s.take_profit)}`;
-  const copyText = `${s.side} ${s.symbol} (${s.strategy}) entry ${price(s.entry_price)} ${tps} SL ${price(s.stop_loss)}${multi && s.breakeven ? " · SL to entry after TP1" : ""} · exit by ${utc(s.expires_at, true)} UTC`;
+  const copyText = `${s.side} ${s.symbol} (${s.strategy}) entry ${price(s.entry_price)} ${tps} SL ${price(s.stop_loss)}${multi && s.breakeven ? " · SL to entry after TP1" : ""} · exit by ${stamp(s.expires_at, true)} ${tz()}`;
 
   return (
     <div className="space-y-6">
@@ -126,12 +126,12 @@ export default function SignalDetail() {
 
       <Card className="card-pad">
         <div className="grid grid-cols-2 gap-x-6 gap-y-5 sm:grid-cols-3 lg:grid-cols-6">
-          <Stat label="Entry" value={price(s.entry_price)} sub={`${utc(s.entry_at)} UTC`} />
+          <Stat label="Entry" value={price(s.entry_price)} sub={`${stamp(s.entry_at)} ${tz()}`} />
           <Stat label="Stop" value={riskFree && active ? price(s.stop_current) : price(s.stop_loss)}
             sub={riskFree && active ? <span className="text-long">moved to entry · risk-free</span> : `−${num(s.sl_pct)}% · ${s.sl_atr} ATR`} tone={riskFree && active ? undefined : "short"} />
           <Stat label={multi ? "Targets reached" : "Target"} value={multi ? <span className="inline-flex items-center gap-2">{s.targets_hit} / {s.targets.length} <TargetPips hit={s.targets_hit} total={s.targets.length} /></span> : price(s.take_profit)}
             sub={multi ? (s.breakeven ? "stop to entry after TP1" : "fixed stop") : `+${num(s.tp_pct)}% · ${s.tp_atr} ATR`} tone={multi ? undefined : "long"} />
-          <Stat label={active ? "Last price" : "Exit"} value={price(last)} sub={active ? "live" : `${utc(s.exit_at)} UTC`} />
+          <Stat label={active ? "Last price" : "Exit"} value={price(last)} sub={active ? "live" : `${stamp(s.exit_at)} ${tz()}`} />
           <Stat label={active ? "Open P&L" : "Net result"} value={<PnL value={active ? upnl : s.pnl_net_pct} />} sub={active ? (s.targets_hit ? "incl. closed targets, before costs" : "before costs") : `${r(s.r_multiple)} · after costs`} />
           <Stat label={active ? "Time left" : "Held"} value={active ? duration((new Date(s.expires_at).getTime() - now) / 1000) : duration(held)} sub={`max ${s.max_bars} candles`} />
         </div>
@@ -161,7 +161,7 @@ export default function SignalDetail() {
               <Row k="ATR(14) at signal" v={price(s.atr)} />
               <Row k="Reward : risk (TP1)" v={s.reward_risk ? `1 : ${num(1 / s.reward_risk, 1)}` : "—"} />
               <Row k="Best / worst excursion" v={<><span className="text-long">{pct(s.mfe_pct)}</span> / <span className="text-short">{pct(s.mae_pct)}</span></>} />
-              <Row k="Expires" v={`${utc(s.expires_at)} UTC`} />
+              <Row k="Expires" v={`${stamp(s.expires_at)} ${tz()}`} />
             </div>
           </Card>
           <Card className="card-pad">

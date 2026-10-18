@@ -64,6 +64,9 @@ async def test_meta_and_noindex(client):
     body = r.json()
     assert [s["code"] for s in body["strategies"]] == ["RGP-4H", "RSR-4H", "MLR-4H"]
     assert body["engine"]["alive"] is True
+    ses = body["session"]
+    assert (ses["tz_abbr"], ses["start"], ses["end"]) == ("IST", "09:00", "23:00")
+    assert ses["checks"] == ["09:30 AM", "01:30 PM", "05:30 PM", "09:30 PM"]
     assert "noindex" in r.headers["x-robots-tag"]
     robots = await client.get("/robots.txt")
     assert "Disallow: /" in robots.text

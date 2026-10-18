@@ -1,4 +1,4 @@
-"""Telegram delivery: outbox (persisted, retried, rate limited), bot commands, daily digest.
+"""Telegram delivery: outbox (persisted, retried, rate limited), bot commands, session messages.
 
 Every message goes through the `telegram_outbox` table first, so a Telegram outage or an engine
 restart never loses a signal; delivery resumes where it stopped. Channel posts are paced to
@@ -10,13 +10,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from sqlalchemy import desc, func, select, update
 
 from .. import db
 from ..config import Settings
 from ..core import stats
+from ..core.position import events
 from ..engine.clock import Clock
 from ..models import Signal, TelegramOutbox, TelegramSubscriber, utcnow
 from ..services import repo
@@ -48,6 +49,11 @@ class TelegramService:
         self._last_global = 0.0
         self._alerted: dict[str, float] = {}
         self.bot_username: str | None = None
+        self.style = fmt.Style.from_settings(settings)
+
+    def _quiet(self) -> bool:
+        """Updates outside the publishing session arrive without sound."""
+        return self.settings.overnight_updates == "silent" and not self.style.session.contains(self.clock.now())
 
     @property
     def enabled(self) -> bool:
@@ -66,7 +72,7 @@ class TelegramService:
     async def enqueue_signal_new(self, s, sig: Signal) -> None:
         if not self.enabled or not sig.published:
             return
-        text = fmt.new_signal(sig, self.settings.default_risk_pct)
+        text = fmt.new_signal(sig, self.style)
         kb = fmt.signal_keyboard(self.settings.public_base_url, sig.id)
         for chat in await self._targets(s):
             s.add(TelegramOutbox(chat_id=chat, kind="signal_new", signal_id=sig.id, text=text,
@@ -80,18 +86,20 @@ class TelegramService:
             TelegramOutbox.signal_id == sig.id, TelegramOutbox.kind == "signal_new",
             TelegramOutbox.status.in_(["sent", "pending"])))).all()
         kb = fmt.signal_keyboard(self.settings.public_base_url, sig.id)
+        silent = self._quiet()
         for chat in dict.fromkeys(chats):
             s.add(TelegramOutbox(chat_id=chat, kind="signal_edit", signal_id=sig.id,
-                                 text=fmt.edited_original(sig, self.settings.default_risk_pct),
+                                 text=fmt.edited_original(sig, self.style),
                                  reply_markup=kb, next_attempt_at=utcnow()))
-            s.add(TelegramOutbox(chat_id=chat, kind=kind, signal_id=sig.id, text=text, next_attempt_at=utcnow()))
+            s.add(TelegramOutbox(chat_id=chat, kind=kind, signal_id=sig.id, text=text, silent=silent,
+                                 next_attempt_at=utcnow()))
 
     async def enqueue_signal_update(self, s, sig: Signal, hit_before: int) -> None:
         """TP1 / TP2 filled while part of the position is still open."""
         await self._follow_up(s, sig, "signal_update", fmt.target_update(sig, hit_before))
 
-    async def enqueue_signal_close(self, s, sig: Signal) -> None:
-        await self._follow_up(s, sig, "signal_close", fmt.close_signal(sig))
+    async def enqueue_signal_close(self, s, sig: Signal, hit_before: int | None = None) -> None:
+        await self._follow_up(s, sig, "signal_close", fmt.close_signal(sig, hit_before))
 
     async def enqueue_notice(self, s, text: str, chat_id: str | None = None, kind: str = "notice") -> None:
         if not self.enabled:
@@ -149,10 +157,11 @@ class TelegramService:
                             raise
                     row.message_id = original
                 else:
-                    res = await self.client.send_message(row.chat_id, row.text, row.reply_markup, original)
+                    res = await self.client.send_message(row.chat_id, row.text, row.reply_markup, original,
+                                                         silent=row.silent)
                     row.message_id = res["message_id"]
             else:
-                res = await self.client.send_message(row.chat_id, row.text, row.reply_markup)
+                res = await self.client.send_message(row.chat_id, row.text, row.reply_markup, silent=row.silent)
                 row.message_id = res["message_id"]
             row.status, row.sent_at, row.error = "sent", utcnow(), None
         except TelegramError as exc:
@@ -219,8 +228,10 @@ class TelegramService:
 
         if cmd == "/start":
             await set_active(self.settings.telegram_dm_enabled)
+            ses, now = self.style.session, self.clock.now()
+            hours = f"{ses.label(ses.next_start(now), False)} – {ses.label(ses.next_end(now), False)} {ses.tzname(now)}"
             return fmt.welcome(self.settings.app_name, self.settings.telegram_channel_url,
-                               self.settings.telegram_dm_enabled)
+                               self.settings.telegram_dm_enabled, hours)
         if cmd == "/subscribe":
             if not self.settings.telegram_dm_enabled:
                 return "Private delivery is disabled. Follow the channel for signals."
@@ -280,24 +291,60 @@ class TelegramService:
                 log.exception("telegram updates loop error")
                 await asyncio.sleep(5)
 
-    # ---------------------------------------------------------------- daily digest
-    async def digest_loop(self) -> None:
+    # ---------------------------------------------------------------- session messages
+    async def session_loop(self) -> None:
+        """Greeting at the session start, summary at the session end (a boundary missed by more
+        than 15 minutes, e.g. during a restart, is skipped rather than sent late)."""
+        ses = self.style.session
         while True:
             now = self.clock.now()
-            nxt = (now + timedelta(days=1)).replace(hour=0, minute=5, second=0, microsecond=0)
-            await self.clock.sleep_until(nxt)
-            try:
-                async with db.sessions()() as s:
-                    day_end = self.clock.now().replace(hour=0, minute=0, second=0, microsecond=0)
-                    day_start = day_end - timedelta(days=1)
-                    closed = [r for r in await repo.closed_signals(s, since=day_start) if r.exit_at < day_end]
-                    recent = await repo.closed_signals(s, since=day_end - timedelta(days=30))
-                    k30 = stats.kpis([{"exit_at": r.exit_at, "pnl_net": r.pnl_net, "r_multiple": r.r_multiple,
-                                       "exit_reason": r.exit_reason} for r in recent])
-                    await self.enqueue_notice(s, fmt.digest(day_start, closed, k30), kind="digest")
-                    await s.commit()
-            except Exception:  # noqa: BLE001
-                log.exception("daily digest failed")
+            for kind, at in (("start", ses.last_start(now)), ("end", ses.last_end(now))):
+                if now - at <= timedelta(minutes=15):
+                    await self._session_message(kind, at)
+            nxt = min(ses.next_start(now), ses.next_end(now))
+            await self.clock.sleep_until(nxt + timedelta(seconds=1))
+
+    async def _session_message(self, kind: str, at: datetime) -> None:
+        try:
+            async with db.sessions()() as s:
+                sent = await repo.get_state(s, "session_messages", {})
+                if sent.get(kind) == at.isoformat():
+                    return  # already sent (restart inside the 15-minute window)
+                text = await (self.session_start_text(s, at) if kind == "start" else self.session_end_text(s, at))
+                await self.enqueue_notice(s, text, kind=f"session_{kind}")
+                await repo.set_state(s, "session_messages", {**sent, kind: at.isoformat()})
+                await s.commit()
+        except Exception:  # noqa: BLE001
+            log.exception("session %s message failed", kind)
+
+    async def _window(self, s, since: datetime, until: datetime):
+        """Published signals with activity in [since, until) and their target / stop events there."""
+        rows = (await s.scalars(select(Signal).where(
+            Signal.published.is_(True), Signal.entry_at < until,
+            (Signal.status == "ACTIVE") | (Signal.exit_at >= since)).order_by(Signal.entry_at))).all()
+        evs = sorted(((kind, t, r) for r in rows for kind, t in events(r) if since <= t < until),
+                     key=lambda e: e[1])
+        return rows, evs
+
+    async def _k30(self, s, now: datetime) -> dict:
+        recent = await repo.closed_signals(s, since=now - timedelta(days=30))
+        return stats.kpis([{"exit_at": r.exit_at, "pnl_net": r.pnl_net, "r_multiple": r.r_multiple,
+                            "exit_reason": r.exit_reason} for r in recent])
+
+    async def session_start_text(self, s, now: datetime) -> str:
+        ses = self.style.session
+        rows, overnight = await self._window(s, ses.last_end(now), now)
+        open_rows = [r for r in rows if r.status == "ACTIVE"]
+        return fmt.session_start(now, self.style, await repo.get_state(s, "regime", {}), open_rows, overnight,
+                                 await self._k30(s, now))
+
+    async def session_end_text(self, s, now: datetime) -> str:
+        since = now - timedelta(days=1)  # the day since the previous summary
+        rows, evs = await self._window(s, since, now)
+        published = [r for r in rows if r.entry_at >= since]
+        closed = sorted((r for r in rows if r.status == "CLOSED" and r.exit_at >= since), key=lambda r: r.exit_at)
+        open_rows = [r for r in rows if r.status == "ACTIVE"]
+        return fmt.session_end(now, self.style, published, evs, closed, open_rows, await self._k30(s, now))
 
     async def queue_health(self, s) -> dict:
         pending = await s.scalar(select(func.count()).select_from(TelegramOutbox)

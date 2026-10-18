@@ -54,12 +54,13 @@ class TelegramClient:
         return await self.call("getMe")
 
     async def send_message(self, chat_id: str | int, text: str, reply_markup: dict | None = None,
-                           reply_to_message_id: int | None = None) -> dict:
+                           reply_to_message_id: int | None = None, silent: bool = False) -> dict:
         reply = ({"message_id": reply_to_message_id, "allow_sending_without_reply": True}
                  if reply_to_message_id else None)
         return await self.call("sendMessage", chat_id=chat_id, text=text, parse_mode="HTML",
                                reply_markup=reply_markup, reply_parameters=reply,
-                               link_preview_options={"is_disabled": True})
+                               link_preview_options={"is_disabled": True},
+                               disable_notification=True if silent else None)
 
     async def edit_message_text(self, chat_id: str | int, message_id: int, text: str,
                                 reply_markup: dict | None = None) -> dict:

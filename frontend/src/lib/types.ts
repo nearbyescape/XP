@@ -53,6 +53,17 @@ export interface Meta {
   telegram: { enabled: boolean; channel_url: string | null; bot_username: string | null };
   default_risk_pct: number;
   costs: { entry: number; tp: number; exit: number };
+  session: {
+    tz: string; // IANA, e.g. Asia/Kolkata
+    tz_abbr: string; // e.g. IST
+    start: string; // "09:00"
+    end: string;
+    open: boolean;
+    next_open: string;
+    next_close: string;
+    next_check: string; // next 4H close that publishes
+    checks: string[]; // e.g. ["09:30 AM", "01:30 PM", ...]
+  };
   server_time: string;
   clock: string;
   next_candle_close: string;

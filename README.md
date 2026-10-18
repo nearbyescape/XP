@@ -35,6 +35,11 @@ docker compose up -d --build
 open http://localhost:8080
 ```
 
+Signals are published during a session, **09:00 AM – 11:00 PM IST** by default (`SESSION_*` in
+`.env`). The Telegram channel gets a greeting at the start, every signal with its TP1 / TP2 / TP3 /
+SL updates as replies (silent overnight), and a summary of the day at the end. See
+[deployment §3](docs/deployment.md#3-telegram-with-botfather).
+
 Search engines are blocked by default (robots.txt + `X-Robots-Tag` + meta tag). See
 [deployment §4](docs/deployment.md#4-search-engine-blocking-default).
 

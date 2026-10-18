@@ -2,7 +2,7 @@ import clsx from "clsx";
 import { ArrowRight, Radar } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useMeta, useRegime, useSignals, useStats } from "@/lib/queries";
-import { base, num, pct, priceShort, r, utc } from "@/lib/format";
+import { base, num, pct, priceShort, r, stamp } from "@/lib/format";
 import type { Kpis, StrategyMeta } from "@/lib/types";
 import { Badge, Card, CardHeader, Empty, Skeleton, Stat } from "@/components/ui";
 import { OutcomeBadge, PnL, SideBadge, STRATEGY_STYLE, Trend } from "@/components/bits";
@@ -29,7 +29,7 @@ function KpiStrip() {
         <Stat label="Profit factor" value={num(k.profit_factor)} sub={`backtest ${num(b.profit_factor)}`} />
         <Stat label="Net per signal" value={pct(k.expectancy)} tone={(k.expectancy ?? 0) >= 0 ? undefined : "short"} sub={`backtest +${num(b.net_pct)}%`} />
         <Stat label="Total R" value={r(k.total_r, 1)} sub={k.avg_r !== null ? `avg ${r(k.avg_r)} / signal` : "fixed-risk units"} />
-        <Stat label="Closed signals" value={k.signals.toLocaleString()} sub={stats.first_entry_at ? `since ${utc(stats.first_entry_at, true)}` : "none yet"} />
+        <Stat label="Closed signals" value={k.signals.toLocaleString()} sub={stats.first_entry_at ? `since ${stamp(stats.first_entry_at, true)}` : "none yet"} />
         <Stat label="Open now" value={stats.open_signals} sub={`${meta.universe.length} markets · ${meta.strategies.filter((s) => s.mode === "live" && !s.auto_paused).length} live strategies`} />
       </div>
     </Card>
@@ -148,7 +148,7 @@ export default function Overview() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Signal desk</h1>
           <p className="mt-1 text-sm text-muted">
-            Three validated 4H strategies across {meta?.universe.length ?? 10} markets · evaluated at every 4H close (UTC) · every result published.
+            Three validated 4H strategies across {meta?.universe.length ?? 10} markets · published {meta ? `${meta.session.start}–${meta.session.end} ${meta.session.tz_abbr}` : "during the session"} · every result recorded.
           </p>
         </div>
         <Link to="/strategies" className="btn">How the strategies work <ArrowRight size={14} /></Link>

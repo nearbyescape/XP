@@ -58,6 +58,10 @@ async def test_engine_matches_replay(tmp_path, frames):
 
     async with db.sessions()() as s:
         rows = (await s.scalars(select(Signal))).all()
+    # only candles closing inside the publishing session (09:00-23:00 IST) are published
+    assert any(r.published for r in rows) and any(not r.published for r in rows)
+    assert all(r.published == engine.session.contains(r.entry_at) for r in rows)
+    assert all(r.mode == ("live" if r.published else "offhours") for r in rows)
     got = pd.DataFrame([{"strategy": r.strategy, "symbol": r.symbol, "side": r.side,
                          "entry_at": pd.Timestamp(r.entry_at), "reason": r.exit_reason,
                          "hits": r.targets_hit} for r in rows])

@@ -1,15 +1,25 @@
-"""Telegram message templates (HTML parse mode)."""
+"""Telegram message templates (HTML parse mode).
+
+Channel messages: the signal, one reply per target / stop hit, the session greeting and the session
+summary. Levels are shown as prices with the share of the position closed at each target.
+"""
 
 from __future__ import annotations
 
-from datetime import datetime
+import hashlib
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 from html import escape
 
 from ..core.catalog import STRATEGIES
 from ..core.position import fills_of, open_return, targets_of
+from ..core.session import Session
 from ..models import Signal
 
 TREND = {1: "▲", -1: "▼", 0: "▬"}
+MARKETS = {"binance_futures": "Binance USDT futures", "binance_spot": "Binance spot",
+           "replay": "Binance (historical replay)"}
+MAX_LINES = 15  # per list in the session messages
 
 
 def price(x: float | None) -> str:
@@ -46,10 +56,6 @@ def duration(seconds: float) -> str:
     return f"{m}m"
 
 
-def when(t: datetime) -> str:
-    return f"{t:%d %b %H:%M} UTC"
-
-
 def signal_url(base_url: str | None, signal_id: int) -> str | None:
     if not base_url or base_url.startswith(("http://localhost", "http://127.")):
         return None
@@ -61,115 +67,206 @@ def signal_keyboard(base_url: str | None, signal_id: int) -> dict | None:
     return {"inline_keyboard": [[{"text": "Open signal ↗", "url": url}]]} if url else None
 
 
-def move(sig: Signal, px: float) -> float:
-    return sig.side * (px / sig.entry_price - 1)
-
-
 def size_pct(z: float) -> str:
     return f"{z * 100:.0f}%"
 
 
-def outcome(sig: Signal) -> tuple[str, str]:
-    """(icon, label) for a closed signal."""
-    n, total = sig.targets_hit or 0, len(targets_of(sig))
-    if sig.exit_reason == "TP":
-        return ("🏆", f"All {total} targets hit") if total > 1 else ("✅", "Target hit")
-    if sig.exit_reason == "BE":
-        return "✅", f"TP{n} hit · rest closed at entry"
-    if sig.exit_reason == "SL":
-        return "🛑", "Stop hit"
-    if sig.exit_reason == "TIME":
-        return "⏱\ufe0f", "Time exit" + (f" after TP{n}" if n else "")
-    return "•", "Closed"
+@dataclass(frozen=True)
+class Style:
+    """What every channel message needs besides the signal itself."""
+    brand: str
+    session: Session
+    market: str
+    entry_window_minutes: int = 15
+
+    @classmethod
+    def from_settings(cls, settings) -> Style:
+        return cls(settings.app_name, Session.from_settings(settings),
+                   MARKETS.get(settings.market_data_source, "Binance"), settings.entry_window_minutes)
 
 
-def side_pair(sig: Signal) -> str:
-    return f"{escape(pair(sig.symbol))} {'LONG' if sig.side == 1 else 'SHORT'} · <code>{sig.strategy}</code>"
+# ---------------------------------------------------------------------------------- signals
+def public_id(sig: Signal) -> str:
+    return hashlib.sha1(sig.uid.encode()).hexdigest()[:12]
 
 
-def new_signal(sig: Signal, risk_pct: float) -> str:
+def side_name(sig: Signal) -> str:
+    return "LONG" if sig.side == 1 else "SHORT"
+
+
+def ticker(sig: Signal) -> str:
+    return f"{escape(sig.symbol)} {side_name(sig)}"
+
+
+def setup(sig: Signal) -> str:
     spec = STRATEGIES[sig.strategy]
-    long = sig.side == 1
+    if spec.kind == "model":
+        detail = f"Model confidence {sig.model_prob * 100:.0f}%" if sig.model_prob is not None else "Model ranked"
+    elif sig.regime_coin == sig.regime_btc and sig.regime_coin:
+        detail = ("Uptrend" if sig.regime_coin == 1 else "Downtrend") + " (coin + BTC)"
+    else:
+        detail = f"Coin {TREND[sig.regime_coin]} · BTC {TREND[sig.regime_btc]}"
+    return f"{escape(spec.name)} · {detail}"
+
+
+def new_signal(sig: Signal, style: Style) -> str:
     targets = targets_of(sig)
-    sl_pct = abs(sig.stop_loss / sig.entry_price - 1)
-    notional = min(20.0, risk_pct / (sl_pct * 100) * 100) if sl_pct else 0.0
-    bench = spec.benchmark
     lines = [
-        f"{'🟢' if long else '🔴'} <b>{'LONG' if long else 'SHORT'} · {escape(pair(sig.symbol))}</b>",
-        f"{escape(spec.name)} · <code>{spec.code}</code>",
-        "",
-        f"Entry    <code>{price(sig.entry_price)}</code>   4H open {sig.entry_at:%H:%M} UTC",
+        f"<b>{escape(style.brand)} Signal · {side_name(sig)}</b>",
+        f"{escape(sig.symbol)} · {escape(style.market)} · 4H",
+        f"Setup: {setup(sig)}",
+        f"Source close: {style.session.label(sig.entry_at)}",
+        f"Entry: {price(sig.entry_price)}",
+        f"Stop loss: {price(sig.stop_loss)}",
     ]
     if len(targets) == 1:
-        lines.append(f"Target   <code>{price(targets[0][0])}</code>   {pct(move(sig, targets[0][0]))}  · limit")
+        lines.append(f"Take profit: {price(targets[0][0])}")
     else:
-        lines += [f"TP{i}      <code>{price(p)}</code>   {pct(move(sig, p))}  · {size_pct(z)}"
-                  for i, (p, z) in enumerate(targets, 1)]
+        lines += [f"TP{i} ({size_pct(z)}): {price(p)}" for i, (p, z) in enumerate(targets, 1)]
+        if sig.breakeven:
+            lines.append("After TP1: move remaining stop to entry")
+    window = sig.entry_at + timedelta(minutes=style.entry_window_minutes)
     lines += [
-        f"Stop     <code>{price(sig.stop_loss)}</code>   −{sl_pct * 100:.2f}%",
-        f"Expires  {when(sig.expires_at)}",
-        "",
-    ]
-    if len(targets) > 1:
-        lines.append("Targets are limit orders." + (" After TP1, move the stop to entry." if sig.breakeven else ""))
-    hits = (f"TP1 {bench['tp1_rate'] * 100:.0f}% · TP2 {bench['tp2_rate'] * 100:.0f}% · "
-            f"TP3 {bench['tp3_rate'] * 100:.0f}%") if len(targets) > 1 and "tp1_rate" in bench \
-        else f"{bench['win_rate'] * 100:.0f}% hit"
-    lines += [
-        f"Size  risk {risk_pct:g}% of equity → ~{notional:.1f}% notional, 1×",
-        f"Regime  BTC {TREND[sig.regime_btc]} · {escape(base_asset(sig.symbol))} {TREND[sig.regime_coin]}"
-        + (f"  ·  model {sig.model_prob:.3f}" if sig.model_prob is not None else ""),
-        f"<i>Backtest 2022–26: {hits} · {bench['net_pct']:+.2f}%/signal</i>",
-        f"#{escape(sig.symbol)} #{spec.code.split('-')[0]}  ·  ID {sig.id}",
+        f"Entry window ends: {style.session.label(window)}",
+        escape(STRATEGIES[sig.strategy].basis),
+        f"Signal: {public_id(sig)}",
+        "<i>Targets are reference levels; results are recorded at these levels, not your fills.</i>",
     ]
     return "\n".join(lines)
 
 
-def status_line(sig: Signal) -> str:
-    """Progress stamped onto the original post: targets reached so far, or the final result."""
-    if sig.status == "CLOSED":
-        icon, label = outcome(sig)
-        return f"{icon} <b>{label}</b> · net {pct(sig.pnl_net)} ({sig.r_multiple:+.2f}R)"
+def outcome(sig: Signal) -> str:
+    """Short outcome of a closed signal: 'TP3', 'TP2, then entry', 'stop loss', 'time exit'."""
+    n, total = sig.targets_hit or 0, len(targets_of(sig))
+    return {"TP": f"TP{total}" if total > 1 else "target hit", "SL": "stop loss", "BE": f"TP{n}, then entry",
+            "TIME": "time exit" + (f" after TP{n}" if n else "")}.get(sig.exit_reason or "", "closed")
+
+
+def progress(sig: Signal) -> str:
+    """Status of an open signal: 'TP2 ✓ · 20% running, stop at entry' or 'waiting for TP1'."""
     n, targets = sig.targets_hit or 0, targets_of(sig)
     if not n:
-        return ""
+        return "waiting for TP1" if len(targets) > 1 else "waiting for target"
     left = 1 - sum(z for _, z in targets[:n])
-    ticks = " ".join(f"TP{i} ✓" for i in range(1, n + 1))
-    stop = " · stop at entry" if sig.breakeven else ""
-    return f"🎯 <b>{ticks}</b> · {size_pct(left)} still open{stop}"
+    return f"TP{n} ✓ · {size_pct(left)} running" + (", stop at entry" if sig.breakeven else "")
+
+
+def edited_original(sig: Signal, style: Style) -> str:
+    """The original post with its progress or final result (edits are silent)."""
+    if sig.status == "CLOSED":
+        line = f"Result: {outcome(sig)} · {pct(sig.pnl_net)}"
+    elif sig.targets_hit:
+        line = f"Status: {progress(sig)}"
+    else:
+        return new_signal(sig, style)
+    return f"{new_signal(sig, style)}\n\n<b>{line}</b>"
 
 
 def target_update(sig: Signal, hit_before: int) -> str:
-    """Reply when one or more targets fill and part of the position is still open."""
+    """Reply when TP1 / TP2 fill and part of the position is still running."""
     targets, fills = targets_of(sig), fills_of(sig)
-    new = range(hit_before, sig.targets_hit or 0)
-    head = " + ".join(f"TP{i + 1}" for i in new)
-    lines = [f"🎯 <b>{head} hit</b>", side_pair(sig)]
-    for i in new:
-        px = fills[i] if i < len(fills) else targets[i][0]
-        lines.append(f"{size_pct(targets[i][1])} closed at <code>{price(px)}</code> ({pct(move(sig, px))})")
-    left = 1 - sum(z for _, z in targets[:sig.targets_hit or 0])
-    if hit_before == 0 and sig.breakeven:
-        lines.append(f"Move the stop to entry <code>{price(sig.entry_price)}</code> · {size_pct(left)} still open")
+    new = list(range(hit_before, sig.targets_hit or 0))
+    fill = lambda i: fills[i] if i < len(fills) else targets[i][0]  # noqa: E731
+    if len(new) == 1:
+        i = new[0]
+        lines = [f"✅ TP{i + 1} hit · {ticker(sig)} · {price(fill(i))} · {size_pct(targets[i][1])} closed"]
     else:
-        lines.append(f"{size_pct(left)} still open" + (" · stop at entry" if sig.breakeven else ""))
+        lines = [f"✅ {' + '.join(f'TP{i + 1}' for i in new)} hit · {ticker(sig)}"]
+        lines += [f"TP{i + 1} {price(fill(i))} · {size_pct(targets[i][1])} closed" for i in new]
+    if hit_before == 0 and sig.breakeven:
+        lines.append(f"Move remaining stop to entry: {price(sig.entry_price)}")
     return "\n".join(lines)
 
 
-def close_signal(sig: Signal) -> str:
-    icon, label = outcome(sig)
-    held = (sig.exit_at - sig.entry_at).total_seconds() if sig.exit_at else 0
-    exit_line = "" if sig.exit_reason == "TP" and len(targets_of(sig)) > 1 else \
-        f"Exit <code>{price(sig.exit_price)}</code> · "
-    return (f"{icon} <b>{label}</b>\n{side_pair(sig)}\n"
-            f"{exit_line}net <b>{pct(sig.pnl_net)}</b> ({sig.r_multiple:+.2f}R) · held {duration(held)}")
+def close_signal(sig: Signal, hit_before: int | None = None) -> str:
+    """Reply when the signal closes: final target, stop loss, stop at entry or time limit.
+    `hit_before` = targets already announced, so targets filled in the same pass are named here."""
+    n, total = sig.targets_hit or 0, len(targets_of(sig))
+    new = list(range(n - 1 if hit_before is None else hit_before, n)) if n else []
+    held = duration((sig.exit_at - sig.entry_at).total_seconds()) if sig.exit_at else "—"
+    result = f"Result: {pct(sig.pnl_net)} · held {held}"
+    if sig.exit_reason == "TP":
+        hits = " + ".join(f"TP{i + 1}" for i in new) if total > 1 else "TP"
+        return f"🏆 {hits} hit · {ticker(sig)} · signal complete\n{result}"
+    if sig.exit_reason == "SL":
+        return f"🛑 SL hit · {ticker(sig)} · {price(sig.exit_price)}\n{result}"
+    if sig.exit_reason == "BE":
+        head = (f"{' + '.join(f'TP{i + 1}' for i in new)} hit, then stop at entry" if hit_before is not None
+                and new else f"Stop at entry hit after TP{n}")
+        return f"🔒 {head} · {ticker(sig)}\n{result}"
+    after = f" after TP{n}" if n else ""
+    return f"⏱️ Time exit{after} · {ticker(sig)} · closed at {price(sig.exit_price)}\n{result}"
 
 
-def edited_original(sig: Signal, risk_pct: float) -> str:
-    line = status_line(sig)
-    return new_signal(sig, risk_pct) + (f"\n\n{line}" if line else "")
+# ---------------------------------------------------------------------------------- session
+EVENT_TEXT = {"TP1": "TP1 hit", "TP2": "TP2 hit", "TP3": "TP3 hit", "SL": "SL hit",
+              "BE": "stop at entry hit", "TIME": "time exit"}
 
 
+def _capped(lines: list[str]) -> list[str]:
+    return lines if len(lines) <= MAX_LINES else lines[:MAX_LINES] + [f"… and {len(lines) - MAX_LINES} more"]
+
+
+def _trend(snapshot: dict) -> str:
+    t = (snapshot.get("BTCUSDT") or {}).get("coin", 0)
+    return {1: "BTC in an uptrend ▲ · long setups active", -1: "BTC in a downtrend ▼ · short setups active",
+            0: "BTC without a clear trend ▬ · fewer rule-based setups"}[t]
+
+
+def _last30(k30: dict) -> str:
+    if not k30.get("signals"):
+        return "Last 30 days: no closed signals yet"
+    pf = f" · PF {k30['profit_factor']:.2f}" if k30.get("profit_factor") else ""
+    return f"Last 30 days: {k30['signals']} signals · {k30['win_rate'] * 100:.1f}% win rate{pf}"
+
+
+def session_start(now: datetime, style: Style, snapshot: dict, open_rows: list[Signal],
+                  overnight: list[tuple[str, datetime, Signal]], k30: dict) -> str:
+    s = style.session
+    local = s.local(now)
+    checks = " · ".join(s.label(t, with_date=False) for t in s.checks(local.date()))
+    lines = [
+        f"☀️ <b>Good morning, {escape(style.brand)} session is open</b>",
+        f"{local:%a, %d %b %Y} · {s.label(s.last_start(now), False)} – {s.label(s.next_end(now), False)} "
+        f"{s.tzname(now)}",
+        f"Market: {_trend(snapshot)}",
+        f"Signal checks: {checks}",
+        "",
+        f"<b>Open signals ({len(open_rows)})</b>" if open_rows else "No open signals.",
+    ]
+    lines += _capped([f"{ticker(r)} · {progress(r)}" for r in open_rows])
+    if overnight:
+        lines += ["", "<b>Overnight</b>"]
+        lines += _capped([f"{ticker(sig)} · {EVENT_TEXT[kind]} · {s.label(t, False)}" for kind, t, sig in overnight])
+    lines += ["", _last30(k30)]
+    return "\n".join(lines)
+
+
+def session_end(now: datetime, style: Style, published: list[Signal], events: list[tuple[str, datetime, Signal]],
+                closed: list[Signal], open_rows: list[Signal], k30: dict) -> str:
+    s = style.session
+    longs = sum(1 for r in published if r.side == 1)
+    counts = {k: sum(1 for kind, _, _ in events if kind == k) for k in ("TP1", "TP2", "TP3", "SL", "BE")}
+    lines = [
+        f"🌙 <b>Session closed · {s.local(now):%a, %d %b %Y}</b>",
+        "",
+        f"Signals: {len(published)}" + (f" · {longs} LONG · {len(published) - longs} SHORT" if published else ""),
+        f"Hits: TP1 ×{counts['TP1']} · TP2 ×{counts['TP2']} · TP3 ×{counts['TP3']} · SL ×{counts['SL']}"
+        + (f" · stop at entry ×{counts['BE']}" if counts["BE"] else ""),
+    ]
+    if closed:
+        wins = sum(1 for r in closed if (r.pnl_net or 0) > 0)
+        avg = sum(r.pnl_net or 0 for r in closed) / len(closed)
+        lines += ["", f"<b>Closed ({len(closed)})</b> · {wins} won · {len(closed) - wins} lost · average {pct(avg)}"]
+        lines += _capped([f"{ticker(r)} · {outcome(r)} · {pct(r.pnl_net)}" for r in closed])
+    if open_rows:
+        lines += ["", f"<b>Open overnight ({len(open_rows)})</b>"]
+        lines += _capped([f"{ticker(r)} · {progress(r)}" for r in open_rows])
+    lines += ["", _last30(k30), f"Next session: {s.label(s.next_start(now))}"]
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------------- bot commands
 def kpi_block(title: str, k: dict) -> str:
     if not k.get("signals"):
         return f"<b>{escape(title)}</b>\nNo closed signals yet."
@@ -181,40 +278,35 @@ def kpi_block(title: str, k: dict) -> str:
 
 def open_signals(rows: list[Signal]) -> str:
     if not rows:
-        return "No open signals right now. New signals are evaluated at every 4H close (00/04/08/12/16/20 UTC)."
+        return "No open signals right now."
     out = [f"<b>Open signals ({len(rows)})</b>"]
     for s in rows:
         live = s.last_price or s.entry_price
-        n = getattr(s, "targets_hit", 0) or 0
-        hits = f" · TP{n} ✓" if n else ""
-        out.append(f"{'🟢' if s.side == 1 else '🔴'} {escape(pair(s.symbol))} <code>{s.strategy}</code> · "
-                   f"entry {price(s.entry_price)} · now {pct(open_return(s, live))}{hits}")
+        out.append(f"{ticker(s)} · {progress(s)} · now {pct(open_return(s, live))}")
     return "\n".join(out)
 
 
 def regime(snapshot: dict) -> str:
     if not snapshot:
         return "Regime data is not available yet."
-    btc = snapshot.get("BTCUSDT", {})
-    head = {1: "BULL — longs active", -1: "BEAR — shorts active", 0: "NEUTRAL — few signals"}
-    out = [f"<b>Market regime</b>: BTC {TREND[btc.get('coin', 0)]} {head[btc.get('coin', 0)]}", ""]
+    out = [f"<b>Market</b>: {_trend(snapshot)}", ""]
     for sym, r in snapshot.items():
         out.append(f"{TREND[r['coin']]} {escape(base_asset(sym)):<5} {price(r['close'])} "
                    f"({pct(r.get('change_24h'))} 24h)")
     return "\n".join(out)
 
 
-def welcome(app_name: str, channel_url: str | None, subscribed: bool) -> str:
+def welcome(app_name: str, channel_url: str | None, subscribed: bool, session_text: str = "") -> str:
     lines = [
-        f"<b>{escape(app_name)}</b> — rule-based and ML-ranked crypto signals on the 4H chart.",
+        f"<b>{escape(app_name)}</b> · rule-based and ML-ranked crypto signals on the 4H chart.",
         "",
         "• Three validated strategies: Regime Pullback, Sweep Reversal, ML-Ranked",
-        "• Every signal has three targets (TP1/TP2/TP3), a stop and a time limit; every result is published",
-        "• Signals arrive at 4H closes (00/04/08/12/16/20 UTC) when the market allows",
-        "",
-        "You'll receive new signals and their results here." if subscribed
-        else "Send /subscribe to receive signals here.",
+        "• Every signal has three targets (TP1/TP2/TP3) and a stop; every result is published",
     ]
+    if session_text:
+        lines.append(f"• Signals are posted during the session, {escape(session_text)}")
+    lines += ["", "You'll receive new signals and their results here." if subscribed
+              else "Follow the channel for signals and results."]
     if channel_url:
         lines += ["", f"Channel: {escape(channel_url)}"]
     lines += ["", "/signals open signals · /stats performance · /regime market · /help",
@@ -251,27 +343,7 @@ HELP = ("<b>Commands</b>\n"
         "/signals — open signals\n"
         "/stats — performance (30 days and all time)\n"
         "/regime — BTC and coin trend\n"
-        "/subscribe — receive signals in this chat\n"
-        "/unsubscribe — stop receiving signals\n"
         "/help — this message")
 
 COMMANDS = [("signals", "Open signals"), ("stats", "Performance"), ("regime", "Market regime"),
-            ("subscribe", "Receive signals here"), ("unsubscribe", "Stop receiving signals"),
             ("help", "Help")]
-
-
-def digest(day: datetime, closed: list[Signal], k30: dict) -> str:
-    wins = sum(1 for s in closed if (s.pnl_net or 0) > 0)
-    lines = [f"<b>Daily summary · {day:%d %b %Y}</b>"]
-    if closed:
-        losses = len(closed) - wins
-        lines.append(f"{len(closed)} closed · {wins} win{'' if wins == 1 else 's'} · "
-                     f"{losses} loss{'' if losses == 1 else 'es'} · "
-                     f"net {sum(s.r_multiple or 0 for s in closed):+.2f}R")
-        for s in closed[:12]:
-            hits = f" · TP{s.targets_hit}" if (s.targets_hit or 0) and len(targets_of(s)) > 1 else ""
-            lines.append(f"{outcome(s)[0]} {escape(pair(s.symbol))} <code>{s.strategy}</code> {pct(s.pnl_net)}{hits}")
-    else:
-        lines.append("No signals closed yesterday.")
-    lines += ["", kpi_block("Last 30 days", k30)]
-    return "\n".join(lines)

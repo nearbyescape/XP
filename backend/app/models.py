@@ -136,7 +136,8 @@ class TelegramOutbox(Base):
 
     id: Mapped[int] = mapped_column(BigId, primary_key=True, autoincrement=True)
     chat_id: Mapped[str] = mapped_column(String(64))
-    kind: Mapped[str] = mapped_column(String(16))  # signal_new | signal_close | digest | notice | test
+    # signal_new | signal_update | signal_close | signal_edit | session_start | session_end | alert | reply | test
+    kind: Mapped[str] = mapped_column(String(16))
     signal_id: Mapped[int | None] = mapped_column(ForeignKey("signals.id", ondelete="SET NULL"),
                                                   nullable=True, index=True)
     text: Mapped[str] = mapped_column(Text)
@@ -145,6 +146,7 @@ class TelegramOutbox(Base):
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     next_attempt_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    silent: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())  # no sound / vibration
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     sent_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)

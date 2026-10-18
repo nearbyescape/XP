@@ -81,7 +81,7 @@ export default function Signals() {
         />
         {!isLoading && !data?.items.length ? (
           <Empty icon={<Inbox size={28} />} title={tab === "active" ? "No open signals" : "No signals match these filters"}>
-            {tab === "active" ? "New signals are evaluated at every 4H close (00/04/08/12/16/20 UTC)." : "Try clearing a filter."}
+            {tab === "active" ? `New signals are published at the session's 4H closes${meta ? ` (${meta.session.checks.join(" · ")} ${meta.session.tz_abbr})` : ""}.` : "Try clearing a filter."}
           </Empty>
         ) : tab === "active" ? (
           <ActiveSignalsTable rows={data?.items ?? []} loading={isLoading} />
