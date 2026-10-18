@@ -26,6 +26,7 @@ from ..core.evaluate import Candidate, evaluate_candle, regime_snapshot
 from ..core.lifecycle import Bar, Costs, pnl, step
 from ..core.ml import MLModel
 from ..core.replay import new_trade
+from ..core.risk import exposure
 from ..core.session import Session
 from ..market.base import MarketData, floor_time
 from ..models import Signal, utcnow
@@ -34,6 +35,7 @@ from ..telegram import formatting as fmt
 from ..telegram.service import TelegramService
 from .clock import Clock
 from .killswitch import review_strategy
+from .watch import review_risk
 
 log = logging.getLogger(__name__)
 BAR = timedelta(seconds=BAR_SECONDS)
@@ -192,6 +194,7 @@ class Engine:
             await repo.set_state(s, "regime", regime_snapshot({k: frames[k] for k in self.symbols if k in frames}))
             await s.commit()
         await self.set_last_eval(t, signals=len(created), seconds=round(time.monotonic() - started, 2))
+        await self.safe(self.review_risk(), "risk")
         await self.event("info", "candle.evaluated",
                          f"{t:%Y-%m-%d %H:%M} evaluated: {len(created)} new signal(s)",
                          {"signals": [s.uid for s in created]})
@@ -207,13 +210,15 @@ class Engine:
             cur = (kl[0].open_time, kl[0].open)
         entry = float(cur[1])
         st = new_trade(c, entry, entry_at)
-        # publish only signals whose candle closes inside the session; the others are tracked
-        in_session = self.session.contains(entry_at)
-        published = state.mode == "live" and not state.auto_paused and in_session
         uid = f"{c.strategy}:{c.symbol}:{c.signal_open:%Y-%m-%dT%H:%MZ}"
         async with db.sessions()() as s:
             if await s.scalar(select(Signal.id).where(Signal.uid == uid)):
                 return None  # idempotent: already created (restart during the same candle)
+            # publish only signals whose candle closes inside the session, while the administrator
+            # has not paused new signals; the others are tracked unpublished
+            halted = bool((await repo.publishing(s)).get("paused"))
+            in_session = self.session.contains(entry_at)
+            published = state.mode == "live" and not state.auto_paused and not halted and in_session
             sig = Signal(
                 uid=uid, origin=self.origin, strategy=c.strategy, symbol=c.symbol, side=c.side,
                 signal_open_at=c.signal_open.to_pydatetime(), entry_at=entry_at,
@@ -224,11 +229,15 @@ class Engine:
                 regime_coin=c.regime_coin, regime_btc=c.regime_btc, model_prob=c.model_prob,
                 model_version=self.model.version if (c.model_prob is not None and self.model) else None,
                 mode="live" if published else ("shadow" if state.mode != "live"
-                                               else "paused" if state.auto_paused else "offhours"),
+                                               else "paused" if state.auto_paused
+                                               else "offhours" if not in_session else "halted"),
                 published=published, status="ACTIVE", last_price=entry, mfe=0.0, mae=0.0,
             )
             s.add(sig)
             await s.flush()
+            if published:
+                sig.risk_at_entry = exposure(await repo.open_signals(s, published_only=True),
+                                             self.settings.default_risk_pct).at_risk
             if self.telegram:
                 await self.telegram.enqueue_signal_new(s, sig)
             await repo.log_event(s, "info", "signal.new",
@@ -302,6 +311,8 @@ class Engine:
                 await s.commit()
                 await review_strategy(s, row.strategy, self.settings, self.telegram, self.clock.now())
                 await s.commit()
+                if row.published:
+                    await self.safe(self.review_risk(), "risk")
             elif st.targets_hit > hit_before:
                 await repo.log_event(s, "info", "signal.target",
                                      f"{row.strategy} {row.symbol} TP{st.targets_hit} hit"
@@ -312,6 +323,11 @@ class Engine:
                 await s.commit()
             else:
                 await s.commit()
+
+    async def review_risk(self) -> None:
+        async with db.sessions()() as s:
+            await review_risk(s, self.settings, self.telegram, self.clock.now())
+            await s.commit()
 
     # ------------------------------------------------------------------ prices / heartbeat
     async def price_loop(self) -> None:

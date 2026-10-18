@@ -68,6 +68,9 @@ class TelegramClient:
                                parse_mode="HTML", reply_markup=reply_markup,
                                link_preview_options={"is_disabled": True})
 
+    async def pin_chat_message(self, chat_id: str | int, message_id: int) -> None:
+        await self.call("pinChatMessage", chat_id=chat_id, message_id=message_id, disable_notification=True)
+
     async def get_updates(self, offset: int | None, timeout: int = 25) -> list[dict]:
         return await self.call("getUpdates", offset=offset, timeout=timeout,
                                allowed_updates=["message"])

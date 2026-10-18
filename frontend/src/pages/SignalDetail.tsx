@@ -161,6 +161,13 @@ export default function SignalDetail() {
               <Row k="ATR(14) at signal" v={price(s.atr)} />
               <Row k="Reward : risk (TP1)" v={s.reward_risk ? `1 : ${num(1 / s.reward_risk, 1)}` : "—"} />
               <Row k="Best / worst excursion" v={<><span className="text-long">{pct(s.mfe_pct)}</span> / <span className="text-short">{pct(s.mae_pct)}</span></>} />
+              {s.risk_at_entry !== null && (
+                <Row k="Open risk when published" v={
+                  <span className={meta && s.risk_at_entry * meta.risk.risk_pct > meta.risk.max_open_risk_pct ? "text-warn" : undefined}>
+                    {s.risk_at_entry} before TP1 · {num(s.risk_at_entry * (meta?.risk.risk_pct ?? 0.5), 1)}%
+                  </span>
+                } />
+              )}
               <Row k="Expires" v={`${stamp(s.expires_at)} ${tz()}`} />
             </div>
           </Card>
@@ -173,7 +180,7 @@ export default function SignalDetail() {
 
       <Card>
         <CardHeader title="Size this trade" hint="Risk-based sizing: the loss at the stop equals your chosen % of the account" />
-        <div className="card-pad"><PositionCalculator entry={s.entry_price} stop={s.stop_loss} target={s.take_profit} targets={multi ? s.targets : undefined} defaultRisk={meta?.default_risk_pct} /></div>
+        <div className="card-pad"><PositionCalculator entry={s.entry_price} stop={s.stop_loss} target={s.take_profit} targets={multi ? s.targets : undefined} defaultRisk={meta?.default_risk_pct} maxOpenRisk={meta?.risk.max_open_risk_pct} /></div>
       </Card>
     </div>
   );

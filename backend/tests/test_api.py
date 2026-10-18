@@ -147,3 +147,22 @@ async def test_targets_in_signal_and_stats(client):
     assert k["signals"] == 3 and k["tp1_rate"] == pytest.approx(200 / 3, abs=0.01) and k["tp2_rate"] == 0
     csv = (await client.get("/api/signals.csv")).text
     assert "take_profit_2" in csv.splitlines()[0]
+
+
+async def test_risk_guard_endpoints(client):
+    meta = (await client.get("/api/meta")).json()
+    assert meta["risk"] == {"risk_pct": 0.5, "max_open_risk_pct": 5.0, "note_signals": 10}
+    assert meta["publishing"] == {"paused": False}
+    h = {"X-Requested-With": "SignalDesk"}
+    assert (await client.put("/api/admin/publishing", json={"paused": True}, headers=h)).status_code == 401
+    await client.post("/api/admin/login", json={"username": "admin", "password": "correct horse"})
+    assert (await client.put("/api/admin/publishing", json={"paused": True})).status_code == 403  # no CSRF header
+    r = (await client.put("/api/admin/publishing", json={"paused": True}, headers=h)).json()
+    assert r["paused"] is True and r["by"] == "admin" and r["changed"] is True
+    assert (await client.put("/api/admin/publishing", json={"paused": True}, headers=h)).json()["changed"] is False
+    assert (await client.get("/api/meta")).json()["publishing"] == {"paused": True}
+    ov = (await client.get("/api/admin/overview")).json()
+    assert ov["publishing"]["paused"] is True and ov["risk_watch"] == {}
+    assert "publishing.paused" in [e["kind"] for e in ov["events"]]
+    assert (await client.post("/api/admin/telegram/rules", headers=h)).status_code == 409  # no bot token
+    assert (await client.put("/api/admin/publishing", json={"paused": False}, headers=h)).json()["paused"] is False

@@ -1,10 +1,10 @@
 import clsx from "clsx";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { KeyRound, LogOut, Play, RefreshCw, Send, ShieldCheck } from "lucide-react";
+import { KeyRound, LogOut, Pause, Pin, Play, RefreshCw, Send, ShieldCheck } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { api, ApiError } from "@/lib/api";
 import { ago, duration, num, stamp, tz } from "@/lib/format";
-import type { AdminOverview, Mode } from "@/lib/types";
+import type { AdminOverview, Mode, WatchMeasure } from "@/lib/types";
 import { Badge, Card, CardHeader, Dot, Empty, Select, Skeleton } from "@/components/ui";
 import { StrategyChip } from "@/components/bits";
 
@@ -118,9 +118,76 @@ function Strategies({ ov }: { ov: AdminOverview }) {
   );
 }
 
+function WatchRow({ m }: { m: WatchMeasure }) {
+  const lower = m.critical !== null && m.critical < m.watch; // win rate: lower is worse
+  const tone = m.level === "critical" ? "short" : m.level === "watch" ? "warn" : "long";
+  const scale = lower ? 100 : Math.max(m.critical ?? m.watch, m.watch) * 1.2;
+  const fill = m.value === null ? 0 : Math.min(1, m.value / scale);
+  const fmt = (x: number) => `${num(x, m.unit === "%" ? 1 : 0)}${m.unit}`;
+  return (
+    <div className="grid grid-cols-[1fr_auto] items-center gap-x-4 gap-y-1 py-2.5">
+      <div className="text-sm">{m.label}</div>
+      <div className="flex items-center gap-2">
+        <span className="num text-sm">{m.value === null ? "—" : fmt(m.value)}</span>
+        {m.value === null ? <Badge>warming up</Badge> : m.level ? <Badge tone={tone}>{m.level}</Badge> : <Badge tone="long">ok</Badge>}
+      </div>
+      <div className="col-span-2">
+        <div className="h-1.5 rounded-full bg-raised ring-1 ring-line">
+          <div className={clsx("h-full rounded-full", m.value === null ? "bg-faint" : { long: "bg-long", warn: "bg-warn", short: "bg-short" }[tone])} style={{ width: `${fill * 100}%` }} />
+        </div>
+        <div className="num mt-1 text-2xs text-faint">
+          {lower ? "alert below" : "alert at"} {fmt(m.watch)}{m.critical !== null ? ` · beyond testing ${lower ? "below" : "at"} ${fmt(m.critical)}` : ""}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RiskGuard({ ov }: { ov: AdminOverview }) {
+  const qc = useQueryClient();
+  const paused = !!ov.publishing.paused;
+  const toggle = useMutation({
+    mutationFn: () => api.admin.setPublishing(!paused),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin"] });
+      qc.invalidateQueries({ queryKey: ["meta"] });
+    },
+  });
+  const measures = Object.values(ov.risk_watch.measures ?? {});
+  return (
+    <Card>
+      <CardHeader title="Risk guard" hint="Early warnings go to the admin chats once per episode; nothing pauses on its own" />
+      <div className="grid gap-6 p-4 sm:p-5 lg:grid-cols-[1fr_1.4fr]">
+        <div className={clsx("self-start rounded-xl border p-4", paused ? "border-warn/40 bg-warn/10" : "border-line bg-raised/50")}>
+          <div className="label">New signals</div>
+          <div className={clsx("mt-1.5 text-lg font-semibold", paused ? "text-warn" : "text-long")}>{paused ? "Paused" : "Publishing"}</div>
+          <p className="mt-1 text-xs text-muted">
+            {paused
+              ? `Paused by ${ov.publishing.by ?? "?"}${ov.publishing.at ? ` ${ago(ov.publishing.at)}` : ""}. Open signals are still tracked and their targets and stops still posted.`
+              : "Pause stops new signals at once (tracked privately instead). Open signals keep every update. Also /pause and /resume in the admin chat."}
+          </p>
+          <button className={clsx("btn mt-4 w-full", !paused && "border-warn/40 text-warn")} disabled={toggle.isPending} onClick={() => toggle.mutate()}>
+            {paused ? <><Play size={14} /> Resume new signals</> : <><Pause size={14} /> Pause all new signals</>}
+          </button>
+          {toggle.error && <p className="mt-2 text-xs text-short">{(toggle.error as Error).message}</p>}
+        </div>
+        <div>
+          <div className="label">Watch {ov.risk_watch.at && <span className="normal-case tracking-normal text-faint">· checked {stamp(ov.risk_watch.at)} {tz()}</span>}</div>
+          {measures.length ? (
+            <div className="mt-1 divide-y divide-line/60">{measures.map((m) => <WatchRow key={m.label} m={m} />)}</div>
+          ) : (
+            <p className="mt-2 text-sm text-muted">Computed by the engine after each 4H check and each closed signal.</p>
+          )}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 function Telegram({ ov }: { ov: AdminOverview }) {
   const [chat, setChat] = useState("");
   const test = useMutation({ mutationFn: () => api.admin.telegramTest(chat || undefined) });
+  const rules = useMutation({ mutationFn: api.admin.telegramRules });
   const t = ov.telegram;
   return (
     <Card>
@@ -144,6 +211,12 @@ function Telegram({ ov }: { ov: AdminOverview }) {
         </div>
         {test.isSuccess && <p className="text-xs text-long">Queued for {test.data.chat_id}. Delivered by the engine within a few seconds.</p>}
         {test.error && <p className="text-xs text-short">{(test.error as Error).message}</p>}
+        <div className="flex items-center justify-between gap-3 border-t border-line pt-4">
+          <p className="text-xs text-muted">Member rules: posted in the channel and pinned (the bot needs the “Pin messages” right).</p>
+          <button className="btn shrink-0" disabled={!t.enabled || !t.channel_id || rules.isPending} onClick={() => rules.mutate()}><Pin size={14} /> Post &amp; pin rules</button>
+        </div>
+        {rules.isSuccess && <p className="text-xs text-long">Rules queued for {rules.data.chat_id}.</p>}
+        {rules.error && <p className="text-xs text-short">{(rules.error as Error).message}</p>}
       </div>
     </Card>
   );
@@ -205,6 +278,7 @@ export default function Admin() {
             <Health ov={ov.data} />
             <Telegram ov={ov.data} />
           </div>
+          <RiskGuard ov={ov.data} />
           <Strategies ov={ov.data} />
           <Events ov={ov.data} />
         </>

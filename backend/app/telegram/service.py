@@ -18,9 +18,10 @@ from .. import db
 from ..config import Settings
 from ..core import stats
 from ..core.position import events
+from ..core.risk import exposure
 from ..engine.clock import Clock
 from ..models import Signal, TelegramOutbox, TelegramSubscriber, utcnow
-from ..services import repo
+from ..services import control, repo
 from . import formatting as fmt
 from .client import TelegramClient, TelegramError
 
@@ -167,6 +168,8 @@ class TelegramService:
                 res = await self.client.send_message(row.chat_id, row.text, row.reply_markup, silent=row.silent)
                 row.message_id = res["message_id"]
             row.status, row.sent_at, row.error = "sent", utcnow(), None
+            if row.kind == "rules":
+                await self._pin(s, row)
         except TelegramError as exc:
             row.attempts += 1
             row.error = str(exc)[:500]
@@ -188,6 +191,18 @@ class TelegramService:
         finally:
             self._last_sent[row.chat_id] = time.monotonic()
             self._last_global = time.monotonic()
+
+    async def _pin(self, s, row: TelegramOutbox) -> None:
+        """Pin the member rules in the channel. The bot needs the 'pin messages' admin right; without it
+        the rules stay posted and the administrators are told."""
+        try:
+            await self.client.pin_chat_message(row.chat_id, row.message_id)
+        except TelegramError as exc:
+            row.error = f"posted, not pinned: {exc}"[:500]
+            await self.enqueue_admin(s, fmt.alert(
+                self.settings.app_name, "warning", "telegram.pin",
+                f"Rules posted in {row.chat_id} but not pinned ({exc}). Give the bot the 'Pin messages' "
+                "right in the channel's admin settings, or pin the message by hand."))
 
     async def sender_loop(self) -> None:
         while True:
@@ -213,10 +228,22 @@ class TelegramService:
         chat_id = int(chat["id"])
         if cmd == "/id":
             return f"Your chat id: <code>{chat_id}</code>"
-        if cmd == "/status" and str(chat_id) in self.settings.admin_chats:
+        admin = str(chat_id) in self.settings.admin_chats
+        if cmd == "/status" and admin:
             return fmt.status(await repo.get_state(s, "heartbeat", {}), await repo.get_state(s, "last_eval", {}),
                               await repo.strategy_states(s), len(await repo.open_signals(s)),
-                              await self.queue_health(s))
+                              await self.queue_health(s), await repo.publishing(s),
+                              await repo.get_state(s, "risk_watch", {}), self.style.session)
+        if cmd in ("/pause", "/resume") and admin:
+            who = f"@{chat['username']}" if chat.get("username") else f"chat {chat_id}"
+            changed = await control.set_publishing(s, self.settings, cmd == "/pause", who)
+            await s.commit()
+            if cmd == "/pause":
+                return ("⏸️ New signals paused. Open signals are still tracked and updated. /resume to restart."
+                        if changed else "New signals are already paused. /resume to restart.")
+            return "▶️ New signals resumed from the next check." if changed else "New signals are not paused."
+        if cmd == "/rules":
+            return fmt.rules(self.style)
         sub = await s.get(TelegramSubscriber, chat_id)
 
         async def set_active(active: bool):
@@ -339,7 +366,8 @@ class TelegramService:
         rows, overnight = await self._window(s, ses.last_end(now), now)
         open_rows = [r for r in rows if r.status == "ACTIVE"]
         return fmt.session_start(now, self.style, await repo.get_state(s, "regime", {}), open_rows, overnight,
-                                 await self._k30(s, now))
+                                 await self._k30(s, now), exposure(open_rows, self.style.risk_pct),
+                                 bool((await repo.publishing(s)).get("paused")))
 
     async def session_end_text(self, s, now: datetime) -> str:
         since = now - timedelta(days=1)  # the day since the previous summary
@@ -347,7 +375,9 @@ class TelegramService:
         published = [r for r in rows if r.entry_at >= since]
         closed = sorted((r for r in rows if r.status == "CLOSED" and r.exit_at >= since), key=lambda r: r.exit_at)
         open_rows = [r for r in rows if r.status == "ACTIVE"]
-        return fmt.session_end(now, self.style, published, evs, closed, open_rows, await self._k30(s, now))
+        return fmt.session_end(now, self.style, published, evs, closed, open_rows, await self._k30(s, now),
+                               exposure(open_rows, self.style.risk_pct),
+                               bool((await repo.publishing(s)).get("paused")))
 
     async def queue_health(self, s) -> dict:
         pending = await s.scalar(select(func.count()).select_from(TelegramOutbox)

@@ -86,6 +86,12 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ chat_id: chat_id || null }),
       }),
+    telegramRules: () => request<{ queued: boolean; chat_id: string }>("/admin/telegram/rules", { method: "POST" }),
+    setPublishing: (paused: boolean) =>
+      request<{ paused: boolean; by?: string; at?: string; changed: boolean }>("/admin/publishing", {
+        method: "PUT",
+        body: JSON.stringify({ paused }),
+      }),
     shadowStats: () => request<Record<string, Stats["kpis"]>>("/admin/stats/shadow"),
   },
 };

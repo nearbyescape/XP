@@ -1,5 +1,5 @@
 import clsx from "clsx";
-import { ArrowRight, Radar } from "lucide-react";
+import { ArrowRight, PauseCircle, Radar } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useMeta, useRegime, useSignals, useStats } from "@/lib/queries";
 import { base, num, pct, priceShort, r, stamp } from "@/lib/format";
@@ -7,6 +7,7 @@ import type { Kpis, StrategyMeta } from "@/lib/types";
 import { Badge, Card, CardHeader, Empty, Skeleton, Stat } from "@/components/ui";
 import { OutcomeBadge, PnL, SideBadge, STRATEGY_STYLE, Trend } from "@/components/bits";
 import { ActiveSignalsTable } from "@/components/SignalsTable";
+import { MemberRules, OpenRiskMeter } from "@/components/Risk";
 
 function ModeBadge({ s }: { s: StrategyMeta }) {
   if (s.auto_paused) return <Badge tone="warn" title={s.pause_reason ?? ""}>Paused</Badge>;
@@ -154,13 +155,25 @@ export default function Overview() {
         <Link to="/strategies" className="btn">How the strategies work <ArrowRight size={14} /></Link>
       </div>
 
+      {meta?.publishing.paused && (
+        <div className="flex items-start gap-3 rounded-xl border border-warn/40 bg-warn/10 px-4 py-3 text-sm">
+          <PauseCircle size={18} className="mt-0.5 shrink-0 text-warn" />
+          <div><span className="font-semibold text-ink">New signals are paused.</span> <span className="text-muted">Open signals are still tracked, and every target and stop is still posted here and in Telegram.</span></div>
+        </div>
+      )}
+
       <KpiStrip />
 
       <Card>
         <CardHeader
           title={<span className="flex items-center gap-2">Active signals <span className="num rounded-md bg-raised px-1.5 text-xs text-muted">{active?.total ?? 0}</span></span>}
           hint="Live price between stop (left) and target (right); updates every few seconds"
-          actions={<Link to="/signals" className="text-xs text-accent hover:underline">All signals</Link>}
+          actions={
+            <>
+              {meta && <OpenRiskMeter rows={active?.items ?? []} risk={meta.risk} />}
+              <Link to="/signals" className="text-xs text-accent hover:underline">All signals</Link>
+            </>
+          }
         />
         {!isLoading && !active?.items.length ? (
           <Empty icon={<Radar size={28} />} title="No open signals right now">
@@ -175,20 +188,8 @@ export default function Overview() {
         <RegimeCard />
         <RecentResults />
         <Card>
-          <CardHeader title="How to use a signal" hint="Four rules that reproduce the published results" />
-          <ol className="space-y-2.5 p-4 text-sm text-muted sm:p-5">
-            {[
-              ["Enter at market", "Signals publish seconds after a 4H close. The entry is the new candle's open."],
-              ["Three targets as limits", "TP1, TP2 and TP3 rest as limit orders for 50%, 30% and 20% of the position (maker fees); the stop is a stop-market order."],
-              ["Size by the stop", `Risk a fixed ${meta?.default_risk_pct ?? 0.5}% of equity per signal and keep exposure at 1×. The calculator does the maths.`],
-              ["Stop to entry after TP1", "Once TP1 fills, move the stop to the entry price: the rest runs risk-free. Close anything still open at the expiry. Every step is logged here and in Telegram."],
-            ].map(([t, d], i) => (
-              <li key={t} className="flex gap-3 rounded-lg border border-line/70 bg-raised/40 p-3">
-                <span className="num grid h-6 w-6 shrink-0 place-items-center rounded-md bg-accent/15 text-xs font-semibold text-accent">{i + 1}</span>
-                <span><span className="font-medium text-ink">{t}.</span> {d}</span>
-              </li>
-            ))}
-          </ol>
+          <CardHeader title="Member rules" hint="How to take a signal and protect the account (pinned in Telegram)" />
+          <MemberRules meta={meta} />
         </Card>
       </div>
 

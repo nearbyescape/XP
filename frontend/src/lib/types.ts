@@ -52,6 +52,12 @@ export interface Meta {
   model: { version: string; threshold: number } | null;
   telegram: { enabled: boolean; channel_url: string | null; bot_username: string | null };
   default_risk_pct: number;
+  risk: {
+    risk_pct: number; // suggested risk per signal, % of the account
+    max_open_risk_pct: number; // member rule: total across signals still before TP1
+    note_signals: number; // signal posts note high open risk from this many before TP1
+  };
+  publishing: { paused: boolean }; // administrator's pause of all new signals
   costs: { entry: number; tp: number; exit: number };
   session: {
     tz: string; // IANA, e.g. Asia/Kolkata
@@ -63,6 +69,7 @@ export interface Meta {
     next_close: string;
     next_check: string; // next 4H close that publishes
     checks: string[]; // e.g. ["09:30 AM", "01:30 PM", ...]
+    entry_window_minutes: number;
   };
   server_time: string;
   clock: string;
@@ -102,6 +109,7 @@ export interface Signal {
   targets: Target[];
   targets_hit: number;
   tp1_at: string | null;
+  risk_at_entry: number | null; // published signals before TP1 when this one was published, itself included
   take_profit_2: number | null;
   take_profit_3: number | null;
   atr: number;
@@ -253,5 +261,22 @@ export interface AdminOverview {
     queue: Record<string, number>;
   };
   events: { id: number; ts: string; level: string; kind: string; message: string }[];
+  publishing: { paused?: boolean; by?: string; at?: string };
+  risk_watch: {
+    at?: string;
+    levels?: Record<string, WatchLevel>;
+    measures?: Record<string, WatchMeasure>;
+  };
   config: { source: string; universe: string[]; risk_pct: number; search_indexing: boolean; public_base_url: string };
+}
+
+export type WatchLevel = "watch" | "critical" | null;
+
+export interface WatchMeasure {
+  label: string;
+  value: number | null;
+  unit: string;
+  level: WatchLevel;
+  watch: number;
+  critical: number | null;
 }

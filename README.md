@@ -15,6 +15,10 @@ of the position, with the stop moved to entry once TP1 fills. Over 2022–26 tha
 return per signal, while 45% of signals also reached TP2 and 30% TP3
 ([research §4](docs/crypto-signal-strategy-research.md#multiple-targets-tp1--tp2--tp3)).
 
+A **risk guard** shows members their open risk (signals still before TP1) on the website and in Telegram, pins
+member rules in the channel, warns administrators early when live results leave the tested range, and lets them
+pause all new signals at once ([deployment §5](docs/deployment.md#5-strategy-controls-the-kill-switch-and-the-risk-guard)).
+
 ## Repository
 
 | Path | What |

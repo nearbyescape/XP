@@ -30,7 +30,7 @@ export default function CalculatorPage() {
         />
         <div className="card-pad">
           <PositionCalculator key={pick} entry={chosen?.entry_price} stop={chosen?.stop_loss} target={chosen?.take_profit}
-            targets={chosen && chosen.targets.length > 1 ? chosen.targets : undefined} defaultRisk={meta?.default_risk_pct} />
+            targets={chosen && chosen.targets.length > 1 ? chosen.targets : undefined} defaultRisk={meta?.default_risk_pct} maxOpenRisk={meta?.risk.max_open_risk_pct} />
         </div>
       </Card>
     </div>

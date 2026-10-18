@@ -13,6 +13,7 @@ from html import escape
 
 from ..core.catalog import STRATEGIES
 from ..core.position import fills_of, open_return, targets_of
+from ..core.risk import Exposure
 from ..core.session import Session
 from ..models import Signal
 
@@ -78,11 +79,15 @@ class Style:
     session: Session
     market: str
     entry_window_minutes: int = 15
+    risk_pct: float = 0.5           # suggested risk per signal, % of the account
+    max_open_risk_pct: float = 5.0  # member rule: total across signals still before TP1
+    risk_note_signals: int = 10     # signal posts note high open risk from this many before TP1
 
     @classmethod
     def from_settings(cls, settings) -> Style:
         return cls(settings.app_name, Session.from_settings(settings),
-                   MARKETS.get(settings.market_data_source, "Binance"), settings.entry_window_minutes)
+                   MARKETS.get(settings.market_data_source, "Binance"), settings.entry_window_minutes,
+                   settings.default_risk_pct, settings.max_open_risk_pct, settings.risk_note_signals)
 
 
 # ---------------------------------------------------------------------------------- signals
@@ -125,6 +130,9 @@ def new_signal(sig: Signal, style: Style) -> str:
         lines += [f"TP{i} ({size_pct(z)}): {price(p)}" for i, (p, z) in enumerate(targets, 1)]
         if sig.breakeven:
             lines.append("After TP1: move remaining stop to entry")
+    if sig.risk_at_entry and sig.risk_at_entry >= style.risk_note_signals:
+        lines.append(f"⚠️ High open risk: {sig.risk_at_entry} signals before TP1, this one included · "
+                     f"keep your total under {style.max_open_risk_pct:g}%")
     window = sig.entry_at + timedelta(minutes=style.entry_window_minutes)
     lines += [
         f"Entry window ends: {style.session.label(window)}",
@@ -220,8 +228,24 @@ def _last30(k30: dict) -> str:
     return f"Last 30 days: {k30['signals']} signals · {k30['win_rate'] * 100:.1f}% win rate{pf}"
 
 
+def open_risk(exp: Exposure, style: Style) -> str:
+    """'Open risk: 4 signals before TP1 (3 long / 1 short) · 2.0% at 0.5% each'."""
+    if not exp.at_risk:
+        return "Open risk: none · every open signal is past TP1, stops at entry"
+    n = exp.at_risk
+    line = (f"Open risk: {n} signal{'s' if n != 1 else ''} before TP1 ({exp.long} long / {exp.short} short) · "
+            f"{n * style.risk_pct:.1f}% at {style.risk_pct:g}% each")
+    if n * style.risk_pct > style.max_open_risk_pct:
+        line += f" ⚠️ above the {style.max_open_risk_pct:g}% limit"
+    return line
+
+
+PAUSED = "⏸️ New signals are paused. Open signals are still tracked and updated."
+
+
 def session_start(now: datetime, style: Style, snapshot: dict, open_rows: list[Signal],
-                  overnight: list[tuple[str, datetime, Signal]], k30: dict) -> str:
+                  overnight: list[tuple[str, datetime, Signal]], k30: dict, exp: Exposure | None = None,
+                  paused: bool = False) -> str:
     s = style.session
     local = s.local(now)
     checks = " · ".join(s.label(t, with_date=False) for t in s.checks(local.date()))
@@ -230,11 +254,13 @@ def session_start(now: datetime, style: Style, snapshot: dict, open_rows: list[S
         f"{local:%a, %d %b %Y} · {s.label(s.last_start(now), False)} – {s.label(s.next_end(now), False)} "
         f"{s.tzname(now)}",
         f"Market: {_trend(snapshot)}",
-        f"Signal checks: {checks}",
+        PAUSED if paused else f"Signal checks: {checks}",
         "",
         f"<b>Open signals ({len(open_rows)})</b>" if open_rows else "No open signals.",
     ]
     lines += _capped([f"{ticker(r)} · {progress(r)}" for r in open_rows])
+    if open_rows and exp is not None:
+        lines.append(open_risk(exp, style))
     if overnight:
         lines += ["", "<b>Overnight</b>"]
         lines += _capped([f"{ticker(sig)} · {EVENT_TEXT[kind]} · {s.label(t, False)}" for kind, t, sig in overnight])
@@ -243,7 +269,8 @@ def session_start(now: datetime, style: Style, snapshot: dict, open_rows: list[S
 
 
 def session_end(now: datetime, style: Style, published: list[Signal], events: list[tuple[str, datetime, Signal]],
-                closed: list[Signal], open_rows: list[Signal], k30: dict) -> str:
+                closed: list[Signal], open_rows: list[Signal], k30: dict, exp: Exposure | None = None,
+                paused: bool = False) -> str:
     s = style.session
     longs = sum(1 for r in published if r.side == 1)
     counts = {k: sum(1 for kind, _, _ in events if kind == k) for k in ("TP1", "TP2", "TP3", "SL", "BE")}
@@ -262,8 +289,33 @@ def session_end(now: datetime, style: Style, published: list[Signal], events: li
     if open_rows:
         lines += ["", f"<b>Open overnight ({len(open_rows)})</b>"]
         lines += _capped([f"{ticker(r)} · {progress(r)}" for r in open_rows])
-    lines += ["", _last30(k30), f"Next session: {s.label(s.next_start(now))}"]
+        if exp is not None:
+            lines.append(open_risk(exp, style))
+    lines += ["", _last30(k30)]
+    if paused:
+        lines.append(PAUSED)
+    lines.append(f"Next session: {s.label(s.next_start(now))}")
     return "\n".join(lines)
+
+
+def rules(style: Style) -> str:
+    """Member rules, pinned in the channel and sent by /rules."""
+    most = int(round(style.max_open_risk_pct / style.risk_pct)) if style.risk_pct else 0
+    return "\n".join([
+        f"📌 <b>{escape(style.brand)} · member rules</b>",
+        "",
+        "1. Place your stop on the exchange as soon as you enter: a stop-market order, reduce-only. "
+        "Never a mental stop.",
+        f"2. Risk {style.risk_pct:g}% of your account per signal ({style.risk_pct / 2:g}% while you are new). "
+        "The calculator on the website sizes the trade.",
+        f"3. Keep your total open risk under {style.max_open_risk_pct:g}%. Signals still before TP1 count: "
+        f"at {style.risk_pct:g}% each that is {most} signals.",
+        "4. Use isolated margin. Calculator sizing needs no extra leverage, so the stop sits far from "
+        "liquidation.",
+        "5. When TP1 fills, move the stop to entry. If the entry window has passed, skip the signal.",
+        "",
+        "<i>Results are recorded at the published levels. Not investment advice.</i>",
+    ])
 
 
 # ---------------------------------------------------------------------------------- bot commands
@@ -309,7 +361,8 @@ def welcome(app_name: str, channel_url: str | None, subscribed: bool, session_te
               else "Follow the channel for signals and results."]
     if channel_url:
         lines += ["", f"Channel: {escape(channel_url)}"]
-    lines += ["", "/signals open signals · /stats performance · /regime market · /help",
+    lines += ["", "Read the member rules first: /rules",
+              "", "/signals open signals · /stats performance · /regime market · /help",
               "", "<i>Not investment advice. Size every trade by its stop.</i>"]
     return "\n".join(lines)
 
@@ -319,15 +372,22 @@ def alert(app_name: str, level: str, kind: str, message: str) -> str:
     return f"{icon} <b>{escape(app_name)}</b> · <code>{escape(kind)}</code>\n{escape(message)}"
 
 
-def status(hb: dict, last_eval: dict, states: dict, open_count: int, queue: dict) -> str:
-    when = lambda iso: f"{iso[:16].replace('T', ' ')} UTC" if iso else "—"  # noqa: E731
+def status(hb: dict, last_eval: dict, states: dict, open_count: int, queue: dict,
+           publishing: dict | None = None, watch: dict | None = None, session: Session | None = None) -> str:
+    def when(iso: str | None, shift: timedelta = timedelta(0)) -> str:
+        if not iso:
+            return "—"
+        t = datetime.fromisoformat(iso) + shift
+        return session.label(t) if session else f"{t:%Y-%m-%d %H:%M} UTC"
+
     evaluated = "skipped" if last_eval.get("skipped") else f"{last_eval.get('signals', 0)} signal(s)"
     lines = [
         "<b>Engine status</b>",
         f"Version {escape(str(hb.get('version', '?')))} · {escape(str(hb.get('source', '?')))}"
         f" · up {duration(hb.get('uptime_s') or 0)}",
         f"Clock: {when(hb.get('clock'))}",
-        f"Last 4H evaluation: {when(last_eval.get('candle'))} · {evaluated}",
+        # the candle is stored by its open time; the check happens at its close
+        f"Last 4H check: {when(last_eval.get('candle'), timedelta(hours=4))} · {evaluated}",
         f"Open signals: {open_count}",
         f"Telegram queue: {queue.get('pending', 0)} pending · {queue.get('failed', 0)} failed",
         "",
@@ -336,6 +396,16 @@ def status(hb: dict, last_eval: dict, states: dict, open_count: int, queue: dict
     for code, st in sorted(states.items()):
         mode = "auto-paused" if st.auto_paused else st.mode
         lines.append(f"<code>{code}</code> {mode}" + (f" — {escape(st.pause_reason)}" if st.pause_reason else ""))
+    if publishing and publishing.get("paused"):
+        lines += ["", f"⏸️ <b>New signals paused</b> by {escape(str(publishing.get('by', '?')))} since "
+                      f"{when(publishing.get('at'))}"]
+    if watch and watch.get("measures"):
+        lines += ["", "<b>Risk watch</b>"]
+        for m in watch["measures"].values():
+            value = "—" if m["value"] is None else f"{m['value']:g}{m['unit']}"
+            flag = {"watch": " 🟠", "critical": " 🔴"}.get(m["level"] or "", "")
+            lines.append(f"{escape(m['label'])}: {value}{flag}")
+    lines += ["", "/pause · /resume — stop or restart new signals"]
     return "\n".join(lines)
 
 
@@ -343,7 +413,8 @@ HELP = ("<b>Commands</b>\n"
         "/signals — open signals\n"
         "/stats — performance (30 days and all time)\n"
         "/regime — BTC and coin trend\n"
+        "/rules — member rules\n"
         "/help — this message")
 
 COMMANDS = [("signals", "Open signals"), ("stats", "Performance"), ("regime", "Market regime"),
-            ("help", "Help")]
+            ("rules", "Member rules"), ("help", "Help")]

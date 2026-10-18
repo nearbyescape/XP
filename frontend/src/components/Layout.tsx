@@ -43,7 +43,9 @@ function SessionStatus() {
     <div className="hidden items-center gap-2 text-xs text-muted lg:flex"
       title={`Signals are published for 4H candles closing between ${s.start} and ${s.end} ${s.tz_abbr}: ${s.checks.join(" · ")}`}>
       <Activity size={14} className="text-accent" />
-      {meta.demo ? (
+      {meta.publishing.paused ? (
+        <span className="text-warn">New signals paused · open signals still tracked</span>
+      ) : meta.demo ? (
         <span>Demo clock <span className="num text-ink">{stamp(meta.clock)}</span> {tz()}</span>
       ) : s.open ? (
         <span>Session open · next check <span className="text-ink"><Countdown target={s.next_check} serverTime={meta.server_time} /></span></span>

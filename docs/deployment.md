@@ -69,11 +69,12 @@ Keep `COOKIE_SECURE=true` behind HTTPS. Set it to `false` only to test the admin
 2. Optional polish in BotFather:
    - `/setdescription` and `/setabouttext`: what users see before pressing Start.
    - `/setuserpic`: the bot avatar.
-   - The command list (`/signals`, `/stats`, `/regime`, `/subscribe`, `/unsubscribe`, `/help`) is
-     registered automatically by the engine.
+   - The command list (`/signals`, `/stats`, `/regime`, `/rules`, `/help`) is registered
+     automatically by the engine.
 3. Create a **channel** (public or private) for the signal feed.
-   - Channel settings → *Administrators* → add your bot with **Post messages** and **Edit messages
-     of others**. Edit rights are how the engine stamps each signal with its final result.
+   - Channel settings → *Administrators* → add your bot with **Post messages**, **Edit messages
+     of others** and **Pin messages**. Edit rights are how the engine stamps each signal with its
+     final result; the pin right lets the admin console pin the member rules (§5).
 4. Set the channel in `.env`:
    - Public channel: `TELEGRAM_CHANNEL_ID=@yourchannel`
    - Private channel: the numeric id, e.g. `-1001234567890`. To find it, post any message in the
@@ -96,16 +97,17 @@ What gets sent to the channel (nothing else):
 
 | Message | When | Sound |
 |---|---|---|
-| Session start: market trend, today's signal checks, open signals, overnight recap, 30-day stats | 09:00 IST | yes |
-| New signal: symbol and side, setup, entry, stop loss, TP1 / TP2 / TP3 with the share closed at each, "after TP1 move the stop to entry", entry window (15 min), "Open signal" button | at a 4H close in the session | yes |
+| Session start: market trend, today's signal checks, open signals with the open-risk line, overnight recap, 30-day stats | 09:00 IST | yes |
+| New signal: symbol and side, setup, entry, stop loss, TP1 / TP2 / TP3 with the share closed at each, "after TP1 move the stop to entry", entry window (15 min), "Open signal" button. When 10 or more published signals are before TP1 (this one included), one extra line: "⚠️ High open risk … keep your total under 5%" | at a 4H close in the session | yes |
 | TP1 / TP2 hit: reply to the signal with the price and the share closed | as it happens | yes in the session, silent at night |
 | Signal closed (TP3, SL, stop at entry, time limit): reply with the result | as it happens | yes in the session, silent at night |
-| Session end: signals of the day, TP1/TP2/TP3/SL hits, closed signals with results, positions open overnight, 30-day stats | 11:00 PM IST | yes |
+| Session end: signals of the day, TP1/TP2/TP3/SL hits, closed signals with results, positions open overnight with the open-risk line, 30-day stats | 11:00 PM IST | yes |
+| Member rules (pinned) | when you press *Post & pin rules* in the admin console | yes |
 
 The original signal post is also edited with its progress and final result; edits never notify.
 Kill-switch pauses and ops alerts go to admins only (below). Set `TELEGRAM_DM_ENABLED=true` to also
 deliver signals to users who start the bot in a private chat; by default the bot only answers
-commands there (`/signals`, `/stats`, `/regime`).
+commands there (`/signals`, `/stats`, `/regime`, `/rules`).
 
 **Ops alerts for you.** Press Start on your bot, send `/id`, and put the number it replies with in
 `TELEGRAM_ADMIN_CHAT_IDS` (comma-separate several admins). Those chats then receive:
@@ -114,11 +116,12 @@ commands there (`/signals`, `/stats`, `/regime`).
 - Binance unreachable for 5 minutes, and recovered;
 - a 4H candle still missing after retries, or a loop error (e.g. the tracker);
 - a strategy auto-paused or resumed by the kill switch, with the numbers that triggered it;
-- a Telegram delivery that failed permanently (e.g. the bot lost its channel admin rights).
+- a Telegram delivery that failed permanently (e.g. the bot lost its channel admin rights);
+- the risk-guard early warnings and new signals paused / resumed (§5).
 
 Alerts of the same kind are sent at most once every 30 minutes. Admins can also send `/status` to
-the bot for the engine clock, the last evaluation, open signals, the Telegram queue and the
-strategy modes.
+the bot for the engine clock, the last evaluation, open signals, the Telegram queue, the strategy
+modes and the risk watch, and `/pause` / `/resume` to stop or restart new signals.
 
 Users subscribe by pressing **Start** on the bot (or `/subscribe`). If a user blocks the bot, they
 are unsubscribed automatically. Delivery goes through a database outbox, paced to Telegram's
@@ -148,7 +151,7 @@ Pages then stay `noindex` but become crawlable, so search engines can see the no
 them (a crawler blocked by robots.txt never sees the header). Switch back to `false` afterwards.
 Set `SEARCH_INDEXING=true` only when you want the site public in search results.
 
-## 5. Strategy controls and the kill switch
+## 5. Strategy controls, the kill switch and the risk guard
 
 The admin console (`/admin`) shows, for each strategy, its mode and rolling health:
 
@@ -164,6 +167,34 @@ manually. Thresholds are set in `.env` (`KILL_SWITCH_*`).
 
 `STRATEGY_MODES` in `.env` only seeds the initial modes. After the first start, the admin console
 is the source of truth.
+
+**Risk guard.** Nothing in it changes which signals publish or how results are recorded: the
+filters and caps tested for this (a cap on open signals, skipping signals after a violent BTC
+candle, pausing after several stops) cost more return than they saved, or only helped on the data
+they were tuned on. Instead:
+
+- **Open risk.** Published signals still before TP1 can lose their full stop; after TP1 the stop is
+  at entry. The website (Active signals), the 09:00 greeting and the 23:00 summary show how many
+  there are, long / short, and the total at `DEFAULT_RISK_PCT` each. The calculator adds the trade
+  being sized to the signals a member already holds and warns above `MAX_OPEN_RISK_PCT` (5%).
+- **Member rules.** Stop on the exchange at once (stop-market, reduce-only); 0.5% risk per signal
+  (0.25% while new); total open risk under 5%; isolated margin, no extra leverage; stop to entry
+  after TP1; skip a signal after its entry window. Shown on the website, sent by `/rules`, and
+  posted and pinned in the channel from *Admin → Telegram → Post & pin rules*.
+- **Early warnings (admins only).** Checked after every 4H evaluation and every closed signal; each
+  alerts once when it reaches a level and once when it is back to normal:
+
+  | Measure | Watch | Beyond testing |
+  |---|---|---|
+  | Published book below its peak (at 0.5% per signal) | 6% (about twice a year in 2022–26) | 8.5% (the worst in testing) |
+  | A strategy's last 30 signals | win rate under 70% (about once a year) | under 55% (worst stretch 57%) |
+  | Signals before TP1 in one direction | 12 (2–3 days a year) | — |
+
+  The *Risk guard* card in the admin console shows the same measures. Thresholds: `WATCH_*`.
+- **Pause all new signals.** *Admin → Risk guard → Pause all new signals*, or `/pause` from an
+  admin chat (`/resume` to restart). New signals are then tracked unpublished (mode `halted`);
+  open signals keep every target and stop update; the greeting says new signals are paused. Use it
+  for an exchange outage, extreme news, or a critical warning you want to review first.
 
 ## 6. Operations
 

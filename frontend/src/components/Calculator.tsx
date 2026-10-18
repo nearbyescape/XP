@@ -21,16 +21,18 @@ function useStored(key: string, initial: string) {
 }
 
 /** Risk-based position sizing: the stop defines the size, never the other way round. */
-export function PositionCalculator({ entry, stop, target, targets, defaultRisk = 0.5, compact }: {
+export function PositionCalculator({ entry, stop, target, targets, defaultRisk = 0.5, maxOpenRisk = 5, compact }: {
   entry?: number;
   stop?: number;
   target?: number;
   targets?: Target[]; // TP1/TP2/TP3 of a signal: gains are shown per target
   defaultRisk?: number;
+  maxOpenRisk?: number; // member rule: total risk across signals still before TP1, % of the account
   compact?: boolean;
 }) {
   const [account, setAccount] = useStored("sd-account", "10000");
   const [risk, setRisk] = useStored("sd-risk", String(defaultRisk));
+  const [held, setHeld] = useStored("sd-held", "0");
   const [e, setE] = useState(priceInput(entry));
   const [s, setS] = useState(priceInput(stop));
   const [t, setT] = useState(priceInput(target));
@@ -49,8 +51,10 @@ export function PositionCalculator({ entry, stop, target, targets, defaultRisk =
     const qty = notional / E;
     const reward = T > 0 ? qty * Math.abs(T - E) : null;
     const ladder = targets?.map((x) => ({ n: x.n, size: x.size_pct / 100, qty: (qty * x.size_pct) / 100, gain: (qty * x.size_pct / 100) * Math.abs(x.price - E), price: x.price }));
-    return { stopDist, riskAmt, notional, qty, leverage: notional / A, reward, ladder };
-  }, [account, risk, e, s, t, targets]);
+    // this trade plus the signals already held that are still before TP1, each at the same risk
+    const openRisk = (Math.max(0, Math.floor(parseFloat(held) || 0)) + 1) * R * 100;
+    return { stopDist, riskAmt, notional, qty, leverage: notional / A, reward, ladder, openRisk };
+  }, [account, risk, held, e, s, t, targets]);
   const qtyFmt = (q: number) => num(q, q >= 100 ? 2 : q >= 1 ? 4 : 6);
 
   const field = (label: string, value: string, set: (v: string) => void, suffix?: string, readOnly?: boolean) => (
@@ -71,6 +75,7 @@ export function PositionCalculator({ entry, stop, target, targets, defaultRisk =
         {field("Entry", e, setE)}
         {field("Stop-loss", s, setS)}
         {!compact && !targets && field("Take-profit (optional)", t, setT)}
+        <div className="col-span-2">{field("Signals you already hold before TP1", held, setHeld, "open")}</div>
       </div>
       <div className="rounded-xl border border-line bg-raised/60 p-4">
         {out ? (
@@ -92,11 +97,18 @@ export function PositionCalculator({ entry, stop, target, targets, defaultRisk =
             <dt className="text-muted">Stop distance</dt><dd className="num text-right">{num(out.stopDist * 100)}%</dd>
             <dt className="text-muted">Exposure</dt>
             <dd className={`num text-right ${out.leverage > 1 ? "text-warn" : ""}`}>{num(out.leverage, 2)}× account</dd>
+            <dt className="text-muted">Open risk with this trade</dt>
+            <dd className={`num text-right ${out.openRisk > maxOpenRisk ? "font-semibold text-warn" : ""}`}>{num(out.openRisk, 1)}% <span className="text-xs text-faint">of {num(maxOpenRisk, 0)}%</span></dd>
           </dl>
         ) : (
           <p className="text-sm text-muted">Enter account size, risk, entry and stop to size the trade.</p>
         )}
         {out?.ladder && <p className="mt-3 text-xs text-muted">After TP1, move the stop to entry: the rest of the trade can no longer lose.</p>}
+        {out && out.openRisk > maxOpenRisk && (
+          <p className="mt-3 text-xs text-warn">
+            Above the {num(maxOpenRisk, 0)}% open-risk rule: skip this signal, or halve the risk until earlier signals reach TP1.
+          </p>
+        )}
         {out && out.leverage > 1 && (
           <p className="mt-3 text-xs text-warn">Exposure above 1× needs leverage. The validated strategies assume 1× notional — lower the risk instead.</p>
         )}

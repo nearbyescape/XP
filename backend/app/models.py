@@ -61,6 +61,8 @@ class Signal(Base):
     fills: Mapped[list | None] = mapped_column(JSON, nullable=True)    # [[iso time, price], ...] per target hit
     targets_hit: Mapped[int] = mapped_column(SmallInteger, default=0, server_default=text("0"))
     tp1_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)  # coin is free from here
+    # published signals still before TP1 (stop not yet at entry) when this one was published, itself included
+    risk_at_entry: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
     atr: Mapped[float] = mapped_column(Double)
     tp_atr: Mapped[float] = mapped_column(Double)
     sl_atr: Mapped[float] = mapped_column(Double)
@@ -136,7 +138,8 @@ class TelegramOutbox(Base):
 
     id: Mapped[int] = mapped_column(BigId, primary_key=True, autoincrement=True)
     chat_id: Mapped[str] = mapped_column(String(64))
-    # signal_new | signal_update | signal_close | signal_edit | session_start | session_end | alert | reply | test
+    # signal_new | signal_update | signal_close | signal_edit | session_start | session_end | rules | alert |
+    # reply | test
     kind: Mapped[str] = mapped_column(String(16))
     signal_id: Mapped[int | None] = mapped_column(ForeignKey("signals.id", ondelete="SET NULL"),
                                                   nullable=True, index=True)

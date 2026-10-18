@@ -14,7 +14,8 @@ from ..core import stats
 from ..core.catalog import STRATEGIES
 from ..db import get_session
 from ..models import EngineEvent, Signal, StrategyState, TelegramOutbox, TelegramSubscriber, utcnow
-from ..services import repo
+from ..services import control, repo
+from ..telegram import formatting as fmt
 from . import auth
 from .public import heartbeat_alive
 from .serialize import kpis_out, signal_out
@@ -93,6 +94,8 @@ async def overview(user: str = Depends(auth.require_admin), s: AsyncSession = De
                      "admin_chats": len(settings.admin_chats)},
         "events": [{"id": e.id, "ts": e.ts, "level": e.level, "kind": e.kind, "message": e.message}
                    for e in events],
+        "publishing": await repo.publishing(s),
+        "risk_watch": await repo.get_state(s, "risk_watch") or {},
         "config": {"source": settings.market_data_source, "universe": settings.symbols,
                    "risk_pct": settings.default_risk_pct, "search_indexing": settings.indexing_allowed,
                    "public_base_url": settings.public_base_url},
@@ -122,6 +125,34 @@ async def update_strategy(code: str, body: StrategyUpdate, user: str = Depends(a
         await repo.log_event(s, "warning", "strategy.updated", f"{st.code}: {', '.join(changes)} (by {user})")
     await s.commit()
     return {"code": st.code, "mode": st.mode, "auto_paused": st.auto_paused}
+
+
+class Publishing(BaseModel):
+    paused: bool
+
+
+@router.put("/publishing")
+async def update_publishing(body: Publishing, user: str = Depends(auth.require_admin),
+                            s: AsyncSession = Depends(get_session), settings: Settings = Depends(get_settings)):
+    """Pause or resume all new signals (open signals keep their updates)."""
+    changed = await control.set_publishing(s, settings, body.paused, user)
+    await s.commit()
+    return {**(await repo.publishing(s)), "changed": changed}
+
+
+@router.post("/telegram/rules", status_code=202)
+async def telegram_rules(user: str = Depends(auth.require_admin), s: AsyncSession = Depends(get_session),
+                         settings: Settings = Depends(get_settings)):
+    """Post the member rules in the channel and pin them."""
+    if not settings.telegram_enabled:
+        raise HTTPException(409, "TELEGRAM_BOT_TOKEN is not configured")
+    if not settings.telegram_channel_id:
+        raise HTTPException(400, "TELEGRAM_CHANNEL_ID is not set")
+    s.add(TelegramOutbox(chat_id=settings.telegram_channel_id, kind="rules", next_attempt_at=utcnow(),
+                         text=fmt.rules(fmt.Style.from_settings(settings))))
+    await repo.log_event(s, "info", "telegram.rules", f"member rules posted to the channel (by {user})")
+    await s.commit()
+    return {"queued": True, "chat_id": settings.telegram_channel_id}
 
 
 class TelegramTest(BaseModel):

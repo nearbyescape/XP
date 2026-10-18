@@ -50,9 +50,11 @@ async def load_frame(s: AsyncSession, symbol: str, interval: str, since: datetim
 
 
 # --- signals -------------------------------------------------------------------------------
-async def open_signals(s: AsyncSession) -> list[Signal]:
-    return list((await s.scalars(select(Signal).where(Signal.status == "ACTIVE")
-                                 .order_by(Signal.entry_at))).all())
+async def open_signals(s: AsyncSession, published_only: bool = False) -> list[Signal]:
+    q = select(Signal).where(Signal.status == "ACTIVE")
+    if published_only:
+        q = q.where(Signal.published.is_(True))
+    return list((await s.scalars(q.order_by(Signal.entry_at))).all())
 
 
 async def positions_open_at(s: AsyncSession, t: datetime) -> set[tuple[str, str]]:
@@ -128,6 +130,11 @@ async def get_state(s: AsyncSession, key: str, default=None):
 async def set_state(s: AsyncSession, key: str, value) -> None:
     await upsert(s, SystemState.__table__, [{"key": key, "value": value, "updated_at": utcnow()}],
                  ["key"], ["value", "updated_at"])
+
+
+async def publishing(s: AsyncSession) -> dict:
+    """{"paused": bool, "by": str, "at": iso} — the administrator's pause of all new signals."""
+    return await get_state(s, "publishing", {}) or {}
 
 
 async def log_event(s: AsyncSession, level: str, kind: str, message: str, data: dict | None = None) -> None:
