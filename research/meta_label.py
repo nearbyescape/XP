@@ -11,6 +11,7 @@ Out-of-sample predictions start 2025-01-01 (same split as the rule-based grid).
 from __future__ import annotations
 
 import argparse
+import json
 import os
 
 import lightgbm as lgb
@@ -27,6 +28,7 @@ RESULTS = os.path.join(HERE, "results")
 SYMBOLS = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT",
            "ADAUSDT", "DOGEUSDT", "AVAXUSDT", "LINKUSDT", "DOTUSDT"]
 COST = dict(entry=0.0007, tp=0.0002, exit=0.0008)  # "pro" cost model (see run_research.py)
+CAL_QUANTILES = (0.90, 0.95, 0.975)
 
 
 @njit(cache=True)
@@ -151,8 +153,13 @@ def main():
     ap.add_argument("--sl", type=float, default=2.0)
     ap.add_argument("--bars", type=int, default=12)
     ap.add_argument("--oos", default="2025-01-01")
+    ap.add_argument("--from-preds", action="store_true", help="reuse saved OOS predictions")
+    ap.add_argument("--export", action="store_true",
+                    help="train the production model on ALL data and save it to results/models/")
     args = ap.parse_args()
 
+    tag = f"{args.tf}_tp{args.tp}_sl{args.sl}_b{args.bars}"
+    preds_path = os.path.join(RESULTS, f"meta_preds_{tag}.parquet")
     frames = load(args.tf)
     rows = []
     for s, (df, X) in frames.items():
@@ -175,6 +182,12 @@ def main():
 
     oos0 = pd.Timestamp(args.oos, tz="UTC")
     end = data.ts.max()
+    if args.export:
+        export_model(data, feats, args, tag, end)
+        return
+    if args.from_preds and os.path.exists(preds_path):
+        report(pd.read_parquet(preds_path), frames, args, oos0, end)
+        return
     bar_td = pd.Timedelta(args.tf.replace("m", "min"))
     purge = bar_td * (args.bars + 1)
     quarters = pd.date_range(oos0, end + pd.offsets.QuarterBegin(1), freq="QS", tz="UTC")
@@ -184,18 +197,55 @@ def main():
         te = data[(data.ts >= q0) & (data.ts < q1)]
         if te.empty:
             continue
-        model = lgb.LGBMClassifier(n_estimators=400, learning_rate=0.03, num_leaves=31,
-                                   min_child_samples=400, subsample=0.7, subsample_freq=1,
-                                   colsample_bytree=0.7, reg_lambda=5.0, verbose=-1)
+        model = make_model()
         model.fit(tr[feats], tr["y"])
         te = te.assign(prob=model.predict_proba(te[feats])[:, 1])
         # IS calibration of the decision threshold: last 12 months of the training window
         cal = tr[tr.ts >= q0 - pd.Timedelta(days=365)]
         cal = cal.assign(prob=model.predict_proba(cal[feats])[:, 1])
+        # thresholds fixed from TRAINING data only: top x% most confident in-sample predictions
+        for qq in CAL_QUANTILES:
+            te[f"thr_cal{int(qq * 1000)}"] = float(np.quantile(cal.prob, qq))
         te["q"] = str(q0.date())
         preds.append(te)
         print(f"{q0.date()}: train={len(tr):,} test={len(te):,} base_wr={te.y.mean():.3f}", flush=True)
     P = pd.concat(preds, ignore_index=True)
+    P[["ts", "symbol", "bar", "side", "pnl", "y", "prob", "q"] + [c for c in P if c.startswith("thr_cal")]] \
+        .to_parquet(preds_path, index=False)
+    report(P, frames, args, oos0, end)
+
+
+def make_model() -> lgb.LGBMClassifier:
+    return lgb.LGBMClassifier(n_estimators=400, learning_rate=0.03, num_leaves=31,
+                              min_child_samples=400, subsample=0.7, subsample_freq=1,
+                              colsample_bytree=0.7, reg_lambda=5.0, verbose=-1)
+
+
+def export_model(data, feats, args, tag, end):
+    """Production model: same recipe as one walk-forward step, trained on everything."""
+    purge = pd.Timedelta(args.tf.replace("m", "min")) * (args.bars + 1)
+    tr = data[data.ts < end - purge]
+    model = make_model()
+    model.fit(tr[feats], tr["y"])
+    cal = tr[tr.ts >= tr.ts.max() - pd.Timedelta(days=365)]
+    prob = model.predict_proba(cal[feats])[:, 1]
+    out = os.path.join(RESULTS, "models")
+    os.makedirs(out, exist_ok=True)
+    model.booster_.save_model(os.path.join(out, f"mlr_{tag}.txt"))
+    meta = {
+        "strategy": "MLR-4H", "timeframe": args.tf, "features": feats,
+        "tp_atr": args.tp, "sl_atr": args.sl, "max_bars": args.bars,
+        "threshold": float(np.quantile(prob, 0.95)), "threshold_rule": "95th pct of last-365d in-sample probs",
+        "max_signals_per_candle": 5, "trained_through": str(tr.ts.max()), "train_rows": int(len(tr)),
+        "retrain": "quarterly, expanding window, same recipe (meta_label.py --export)",
+    }
+    with open(os.path.join(out, f"mlr_{tag}.json"), "w") as fh:
+        json.dump(meta, fh, indent=2)
+    print(json.dumps({k: v for k, v in meta.items() if k != "features"}, indent=2))
+
+
+def report(P, frames, args, oos0, end):
+    tag = f"{args.tf}_tp{args.tp}_sl{args.sl}_b{args.bars}"
     base = P.y.mean()
     print(f"\nOOS base win-rate (all bars, geometry TP{args.tp}/SL{args.sl}/{args.bars}b): {base:.3f}")
     print("OOS by predicted-probability bucket (independent, overlapping trades):")
@@ -207,30 +257,43 @@ def main():
     # Tradable simulation: take signals with prob >= threshold, one position per symbol.
     days = (end - oos0).days
     out = []
-    for thr in (0.80, 0.82, 0.84, 0.86, 0.88, 0.90):
+    cal_cols = [c for c in P.columns if c.startswith("thr_cal")]
+    for thr in [0.80, 0.82, 0.84, 0.86, 0.88, 0.90] + cal_cols:
         trades = []
         for s, (df, _) in frames.items():
-            sub = P[(P.symbol == s) & (P.prob >= thr)]
+            mine = P[P.symbol == s]
+            cut = mine[thr] if isinstance(thr, str) else thr
+            sub = mine[mine.prob >= cut]
             side = np.zeros(len(df), np.int8)
             # if both sides qualify on a bar, keep the more confident one
             sub = sub.sort_values("prob").drop_duplicates("bar", keep="last")
             side[sub.bar.to_numpy()] = sub.side.to_numpy()
             a = ta.atr(df.high, df.low, df.close, 14).to_numpy()
             sig = {"side": side, "tp_d": args.tp * a, "sl_d": args.sl * a}
-            trades.append(simulate(df, sig, max_bars=args.bars, symbol=s, cost_entry=COST["entry"],
-                                   cost_tp=COST["tp"], cost_exit=COST["exit"]))
+            t = simulate(df, sig, max_bars=args.bars, symbol=s, cost_entry=COST["entry"],
+                         cost_tp=COST["tp"], cost_exit=COST["exit"])
+            sig_bar = df.ts.searchsorted(t.entry_time.to_numpy()) - 1
+            t["sl_pct"] = sig["sl_d"][sig_bar] / t.entry * 100
+            trades.append(t)
         t = pd.concat(trades, ignore_index=True)
         t = t[t.entry_time >= oos0]
         m = metrics(t, days)
         m["threshold"] = thr
+        r = (t.sort_values("exit_time").pnl / (t.sort_values("exit_time").sl_pct / 100)).to_numpy()
+        eq = np.cumprod(1 + r * 0.005)
+        m["exp_R"] = r.mean()
+        m["cagr_at_0.5pct_risk"] = eq[-1] ** (365 / days) - 1
+        m["maxdd_at_0.5pct_risk"] = (1 - eq / np.maximum.accumulate(eq)).max()
         out.append(m)
+        if isinstance(thr, str):
+            os.makedirs(os.path.join(RESULTS, "candidates"), exist_ok=True)
+            t.to_csv(os.path.join(RESULTS, "candidates", f"C_meta_{tag}_{thr}_trades.csv"), index=False)
     res = pd.DataFrame(out)
     cols = ["threshold", "trades", "signals_per_day", "win_rate", "breakeven_wr", "expectancy_pct",
-            "profit_factor", "acct_return_pct", "acct_max_dd_pct", "max_consec_losses"]
+            "profit_factor", "max_consec_losses", "exp_R", "cagr_at_0.5pct_risk", "maxdd_at_0.5pct_risk"]
     print("\nOOS tradable (one position per symbol):")
     print(res[cols].round(4).to_string(index=False))
     os.makedirs(RESULTS, exist_ok=True)
-    tag = f"{args.tf}_tp{args.tp}_sl{args.sl}_b{args.bars}"
     res.to_csv(os.path.join(RESULTS, f"meta_{tag}.csv"), index=False)
     tab.to_csv(os.path.join(RESULTS, f"meta_buckets_{tag}.csv"))
 

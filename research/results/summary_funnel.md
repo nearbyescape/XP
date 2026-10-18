@@ -1,11 +1,21 @@
 | timeframe   | cost_model   | strategy                    |   configs |   is_wr80_configs |   is_qualified |   oos_survivors |   median_oos_expectancy_pct |   best_is_oos_wr |   best_is_oos_pf |
 |:------------|:-------------|:----------------------------|----------:|------------------:|---------------:|----------------:|----------------------------:|-----------------:|-----------------:|
+| 15m         | pro          | S10_liquidity_sweep         |      1728 |                87 |              0 |               0 |                      -0.105 |          nan     |          nan     |
+| 15m         | pro          | S9_regime_gated_pullback    |      1458 |               280 |              0 |               0 |                      -0.082 |          nan     |          nan     |
+| 1d          | pro          | S10_liquidity_sweep         |      1728 |               145 |              2 |               1 |                       0.264 |            0.827 |            0.917 |
+| 1d          | pro          | S9_regime_gated_pullback    |      1458 |               527 |            207 |              40 |                       0.144 |            0.931 |            1.723 |
 | 1h          | taker        | S1_trend_pullback_rsi       |       684 |               142 |              1 |               0 |                      -0.141 |            0.776 |            0.726 |
 | 1h          | taker        | S2_bollinger_snapback       |       864 |               115 |              5 |               0 |                      -0.191 |            0.796 |            0.749 |
 | 1h          | taker        | S3_capitulation_reversal    |      1152 |               183 |              0 |               0 |                      -0.257 |          nan     |          nan     |
 | 1h          | taker        | S4_btc_relative_dislocation |      1296 |               187 |              0 |               0 |                      -0.232 |          nan     |          nan     |
 | 1h          | taker        | S5_trend_continuation_tp1   |        96 |                 0 |              0 |               0 |                      -0.404 |          nan     |          nan     |
 | 1h          | taker        | S6_vwap_stretch             |       768 |               184 |              0 |               0 |                      -0.187 |          nan     |          nan     |
+| 1h          | pro          | S1_trend_pullback_rsi       |       684 |               144 |              4 |               0 |                      -0.118 |            0.776 |            0.776 |
+| 1h          | pro          | S6_vwap_stretch             |       768 |               188 |              0 |               0 |                      -0.155 |          nan     |          nan     |
+| 1h          | pro          | S8_rsi_extreme_limit        |      1152 |                19 |              0 |               0 |                      -0.158 |          nan     |          nan     |
+| 1h          | pro          | S10_liquidity_sweep         |      1728 |               315 |              4 |               2 |                      -0.138 |            0.797 |            0.894 |
+| 1h          | pro          | S1s_trend_pullback_sides    |       972 |               422 |             31 |               0 |                      -0.098 |            0.78  |            0.845 |
+| 1h          | pro          | S9_regime_gated_pullback    |      1458 |               658 |             71 |               0 |                      -0.118 |            0.745 |            0.773 |
 | 4h          | taker        | S1_trend_pullback_rsi       |       684 |               127 |             46 |               0 |                      -0.104 |            0.836 |            1.027 |
 | 4h          | taker        | S2_bollinger_snapback       |       864 |               141 |             30 |               0 |                      -0.234 |            0.79  |            0.701 |
 | 4h          | taker        | S3_capitulation_reversal    |      1152 |               292 |              0 |               0 |                      -0.306 |          nan     |          nan     |

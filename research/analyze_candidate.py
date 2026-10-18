@@ -16,7 +16,7 @@ import pandas as pd
 
 import run_research as R
 from backtest.engine import metrics, simulate
-from backtest.strategies import STRATEGIES, Features
+from backtest.strategies import STRATEGIES
 
 KEEP = ["trades", "win_rate", "breakeven_wr", "avg_win_pct", "avg_loss_pct", "expectancy_pct",
         "profit_factor", "worst_trade_pct", "max_consec_losses", "acct_return_pct", "acct_max_dd_pct"]
