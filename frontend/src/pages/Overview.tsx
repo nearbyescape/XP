@@ -5,7 +5,7 @@ import { useMeta, useRegime, useSignals, useStats } from "@/lib/queries";
 import { base, num, pct, priceShort, r, utc } from "@/lib/format";
 import type { Kpis, StrategyMeta } from "@/lib/types";
 import { Badge, Card, CardHeader, Empty, Skeleton, Stat } from "@/components/ui";
-import { OutcomeBadge, PnL, SideBadge, StrategyChip, STRATEGY_STYLE, Trend } from "@/components/bits";
+import { OutcomeBadge, PnL, SideBadge, STRATEGY_STYLE, Trend } from "@/components/bits";
 import { ActiveSignalsTable } from "@/components/SignalsTable";
 
 function ModeBadge({ s }: { s: StrategyMeta }) {
@@ -121,10 +121,12 @@ function RecentResults() {
             <li key={s.id}>
               <Link to={`/signals/${s.id}`} className="flex items-center gap-3 px-4 py-2.5 text-sm transition hover:bg-raised/60 sm:px-5">
                 <SideBadge side={s.side} />
-                <span className="w-16 font-semibold">{base(s.symbol)}</span>
-                <StrategyChip code={s.strategy} />
-                <span className="ml-auto flex items-center gap-3">
-                  <OutcomeBadge reason={s.exit_reason} pnl={s.pnl_net_pct} />
+                <span className="w-14 font-semibold">{base(s.symbol)}</span>
+                <span className={clsx("num grid h-5 w-5 place-items-center rounded border text-2xs font-bold", STRATEGY_STYLE[s.strategy]?.chip)} title={s.strategy}>
+                  {STRATEGY_STYLE[s.strategy]?.letter}
+                </span>
+                <span className="ml-auto flex items-center gap-2">
+                  <span className="flex w-16 justify-end"><OutcomeBadge reason={s.exit_reason} pnl={s.pnl_net_pct} /></span>
                   <PnL value={s.pnl_net_pct} className="w-16 text-right" />
                 </span>
               </Link>
@@ -154,37 +156,31 @@ export default function Overview() {
 
       <KpiStrip />
 
+      <Card>
+        <CardHeader
+          title={<span className="flex items-center gap-2">Active signals <span className="num rounded-md bg-raised px-1.5 text-xs text-muted">{active?.total ?? 0}</span></span>}
+          hint="Live price between stop (left) and target (right); updates every few seconds"
+          actions={<Link to="/signals" className="text-xs text-accent hover:underline">All signals</Link>}
+        />
+        {!isLoading && !active?.items.length ? (
+          <Empty icon={<Radar size={28} />} title="No open signals right now">
+            The engine scores every market at each 4H close. A signal is published only when a strategy's conditions are met, so quiet periods are normal, especially when BTC has no clear trend.
+          </Empty>
+        ) : (
+          <ActiveSignalsTable rows={active?.items ?? []} loading={isLoading} />
+        )}
+      </Card>
+
       <div className="grid gap-6 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
-          <CardHeader
-            title={<span className="flex items-center gap-2">Active signals <span className="num rounded-md bg-raised px-1.5 text-xs text-muted">{active?.total ?? 0}</span></span>}
-            hint="Live price between stop (left) and target (right); updates every few seconds"
-            actions={<Link to="/signals" className="text-xs text-accent hover:underline">All signals</Link>}
-          />
-          {!isLoading && !active?.items.length ? (
-            <Empty icon={<Radar size={28} />} title="No open signals right now">
-              The engine scores every market at each 4H close. A signal is published only when a strategy's conditions are met, so quiet periods are normal, especially when BTC has no clear trend.
-            </Empty>
-          ) : (
-            <ActiveSignalsTable rows={active?.items ?? []} loading={isLoading} />
-          )}
-        </Card>
         <RegimeCard />
-      </div>
-
-      <div className="grid gap-6 md:grid-cols-3">
-        {meta?.strategies.map((s) => <StrategyCard key={s.code} s={s} k={stats?.by_strategy[s.code]} />)}
-      </div>
-
-      <div className="grid gap-6 lg:grid-cols-3">
-        <div className="lg:col-span-1"><RecentResults /></div>
-        <Card className="card-pad lg:col-span-2">
-          <h2 className="text-sm font-semibold">How to use a signal</h2>
-          <ol className="mt-3 grid gap-3 text-sm text-muted sm:grid-cols-2">
+        <RecentResults />
+        <Card>
+          <CardHeader title="How to use a signal" hint="Four rules that reproduce the published results" />
+          <ol className="space-y-2.5 p-4 text-sm text-muted sm:p-5">
             {[
               ["Enter at market", "Signals publish seconds after a 4H close. The entry is the new candle's open."],
-              ["Place the target as a limit order", "Take-profit is a resting limit (maker fee). The stop is a stop-market order."],
-              ["Size by the stop", `Risk a fixed ${meta?.default_risk_pct ?? 0.5}% of equity per signal. The calculator does the maths; keep exposure at 1×.`],
+              ["Target as a limit order", "Take-profit rests as a limit (maker fee); the stop is a stop-market order."],
+              ["Size by the stop", `Risk a fixed ${meta?.default_risk_pct ?? 0.5}% of equity per signal and keep exposure at 1×. The calculator does the maths.`],
               ["Respect the time stop", "If neither level is hit by the expiry, close at market. Every outcome is logged here and in Telegram."],
             ].map(([t, d], i) => (
               <li key={t} className="flex gap-3 rounded-lg border border-line/70 bg-raised/40 p-3">
@@ -194,6 +190,10 @@ export default function Overview() {
             ))}
           </ol>
         </Card>
+      </div>
+
+      <div className="grid gap-6 md:grid-cols-3">
+        {meta?.strategies.map((s) => <StrategyCard key={s.code} s={s} k={stats?.by_strategy[s.code]} />)}
       </div>
     </div>
   );

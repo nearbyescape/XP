@@ -8,13 +8,13 @@ import { useLive } from "@/lib/live";
 import { LevelBar, OutcomeBadge, PnL, SideBadge, StrategyChip, useNow } from "./bits";
 import { Badge, Skeleton } from "./ui";
 
-function Coin({ symbol }: { symbol: string }) {
+function Coin({ symbol, compact }: { symbol: string; compact?: boolean }) {
   const [b, q] = pair(symbol).split("/");
   return (
     <div className="flex items-center gap-2.5">
       <div className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-raised text-[8.5px] font-bold tracking-tight text-ink ring-1 ring-line">{b.slice(0, 4)}</div>
       <div className="leading-tight">
-        <div className="font-semibold text-ink">{b}<span className="font-normal text-faint">/{q}</span></div>
+        <div className="font-semibold text-ink">{b}{!compact && <span className="font-normal text-faint">/{q}</span>}</div>
       </div>
     </div>
   );
@@ -27,7 +27,33 @@ export function ActiveSignalsTable({ rows, loading }: { rows: Signal[]; loading?
   const now = useNow(15_000);
   if (loading) return <TableSkeleton />;
   return (
-    <div className="overflow-x-auto">
+    <>
+    <ul className="divide-y divide-line/60 sm:hidden">
+      {rows.map((s) => {
+        const last = prices?.prices?.[s.symbol] ?? s.last_price;
+        const upnl = last ? unrealized(s.side, s.entry_price, last) : null;
+        const left = (new Date(s.expires_at).getTime() - now) / 1000;
+        return (
+          <li key={s.id} onClick={() => nav(`/signals/${s.id}`)} className={clsx("cursor-pointer px-4 py-3.5 active:bg-raised", flashed.has(s.id) && "animate-flash")}>
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2"><Coin symbol={s.symbol} /><SideBadge side={s.side} /></div>
+              <PnL value={upnl} className="text-sm font-semibold" />
+            </div>
+            <div className="mt-2.5"><LevelBar entry={s.entry_price} tp={s.take_profit} sl={s.stop_loss} last={last} compact /></div>
+            <div className="num mt-1 flex justify-between text-2xs">
+              <span className="text-short/90">SL {price(s.stop_loss)}</span>
+              <span className="text-muted">entry {price(s.entry_price)}</span>
+              <span className="text-long/90">TP {price(s.take_profit)}</span>
+            </div>
+            <div className="mt-2 flex items-center justify-between text-xs text-muted">
+              <StrategyChip code={s.strategy} />
+              <span className="num inline-flex items-center gap-1"><Clock3 size={12} />{left > 0 ? duration(left) : "closing"} left</span>
+            </div>
+          </li>
+        );
+      })}
+    </ul>
+    <div className="hidden overflow-x-auto sm:block">
       <table className="w-full min-w-[880px] text-sm">
         <thead>
           <tr className="table-head">
@@ -72,6 +98,7 @@ export function ActiveSignalsTable({ rows, loading }: { rows: Signal[]; loading?
         </tbody>
       </table>
     </div>
+    </>
   );
 }
 
@@ -83,7 +110,23 @@ export function HistoryTable({ rows, loading }: { rows: Signal[]; loading?: bool
   const siteOrigin = meta?.demo ? "demo" : "live";
   if (loading) return <TableSkeleton />;
   return (
-    <div className="overflow-x-auto">
+    <>
+    <ul className="divide-y divide-line/60 sm:hidden">
+      {rows.map((s) => (
+        <li key={s.id} onClick={() => nav(`/signals/${s.id}`)} className="flex cursor-pointer items-center gap-3 px-4 py-3 active:bg-raised">
+          <div className="w-[72px] shrink-0"><Coin symbol={s.symbol} compact /></div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5"><SideBadge side={s.side} /><OutcomeBadge reason={s.exit_reason} pnl={s.pnl_net_pct} /></div>
+            <div className="num mt-1 truncate text-2xs text-faint">{utc(s.entry_at)} · {s.strategy}</div>
+          </div>
+          <div className="text-right">
+            <PnL value={s.status === "CLOSED" ? s.pnl_net_pct : s.unrealized_pct} className="text-sm" />
+            <div className="num text-2xs text-faint">{r(s.r_multiple)}</div>
+          </div>
+        </li>
+      ))}
+    </ul>
+    <div className="hidden overflow-x-auto sm:block">
       <table className="w-full min-w-[900px] text-sm">
         <thead>
           <tr className="table-head">
@@ -124,6 +167,7 @@ export function HistoryTable({ rows, loading }: { rows: Signal[]; loading?: bool
         </tbody>
       </table>
     </div>
+    </>
   );
 }
 

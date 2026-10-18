@@ -63,13 +63,13 @@ function Health({ ov }: { ov: AdminOverview }) {
   );
 }
 
-function Gauge({ value, min, label, fmt }: { value: number | null; min: number; label: string; fmt: (x: number) => string }) {
+function Gauge({ value, min, label, fmt, armed }: { value: number | null; min: number; label: string; fmt: (x: number) => string; armed: boolean }) {
   const ok = value === null || value >= min;
   return (
     <div>
       <div className="flex justify-between text-2xs text-muted"><span>{label}</span><span className="num">{value === null ? "—" : fmt(value)} <span className="text-faint">/ min {fmt(min)}</span></span></div>
       <div className="mt-1 h-1.5 rounded-full bg-raised ring-1 ring-line">
-        <div className={clsx("h-full rounded-full", ok ? "bg-long" : "bg-short")} style={{ width: `${value === null ? 0 : Math.min(100, (value / (min * 1.25)) * 100)}%` }} />
+        <div className={clsx("h-full rounded-full", !armed ? "bg-faint" : ok ? "bg-long" : "bg-short")} style={{ width: `${value === null ? 0 : Math.min(100, (value / (min * 1.25)) * 100)}%` }} />
       </div>
     </div>
   );
@@ -96,8 +96,10 @@ function Strategies({ ov }: { ov: AdminOverview }) {
               <span className="num text-xs text-faint">{s.active} open · {s.closed} closed</span>
             </div>
             <div className="space-y-2">
-              <Gauge label={`Win rate, last ${s.rolling.signals}/${s.rolling.window}`} value={s.rolling.win_rate} min={s.rolling.min_win_rate} fmt={(x) => `${num(x, 1)}%`} />
-              <Gauge label="Profit factor" value={s.rolling.profit_factor} min={s.rolling.min_profit_factor} fmt={(x) => num(x)} />
+              <Gauge armed={s.rolling.signals >= s.rolling.window}
+                label={s.rolling.signals >= s.rolling.window ? `Win rate, last ${s.rolling.window}` : `Win rate, ${s.rolling.signals}/${s.rolling.window} (kill switch arms at ${s.rolling.window})`}
+                value={s.rolling.win_rate} min={s.rolling.min_win_rate} fmt={(x) => `${num(x, 1)}%`} />
+              <Gauge armed={s.rolling.signals >= s.rolling.window} label="Profit factor" value={s.rolling.profit_factor} min={s.rolling.min_profit_factor} fmt={(x) => num(x)} />
               {s.auto_paused && <p className="text-xs text-warn">{s.pause_reason}</p>}
             </div>
             <div className="flex items-center gap-2">

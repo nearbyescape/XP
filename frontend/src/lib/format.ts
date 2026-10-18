@@ -15,6 +15,17 @@ export function priceShort(x: number | null | undefined): string {
   return x.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
 }
 
+/** Account currency amounts (USDT): always 2 decimals. */
+export function money(x: number | null | undefined): string {
+  if (x === null || x === undefined || Number.isNaN(x)) return "—";
+  return x.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+/** A price as plain text for an <input> (display precision, no thousands separators). */
+export function priceInput(x: number | null | undefined): string {
+  return x === null || x === undefined ? "" : price(x).replace(/,/g, "");
+}
+
 export function pct(x: number | null | undefined, digits = 2, signed = true): string {
   if (x === null || x === undefined || Number.isNaN(x)) return "—";
   const s = x.toFixed(digits);

@@ -39,6 +39,8 @@
   body { @apply min-h-screen bg-bg text-ink; }
   ::selection { background: rgb(var(--accent) / 0.3); }
   * { scrollbar-width: thin; scrollbar-color: rgb(var(--line)) transparent; }
+  /* grid items default to min-width:auto and would stretch to wide tables: keep them shrinkable */
+  .grid > * { min-width: 0; }
 }
 
 @layer components {

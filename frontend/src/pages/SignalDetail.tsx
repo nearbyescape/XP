@@ -76,7 +76,7 @@ export default function SignalDetail() {
           <SideBadge side={s.side} />
           <StrategyChip code={s.strategy} full />
           <OutcomeBadge reason={s.exit_reason} pnl={s.pnl_net_pct} />
-          {s.origin !== "live" && <Badge tone="warn">{s.origin}</Badge>}
+          {s.origin !== (meta?.demo ? "demo" : "live") && <Badge tone="warn">{s.origin}</Badge>}
         </div>
         <button className="btn" onClick={() => { navigator.clipboard?.writeText(copyText); setCopied(true); window.setTimeout(() => setCopied(false), 1500); }}>
           {copied ? <Check size={14} /> : <Copy size={14} />} {copied ? "Copied" : "Copy levels"}

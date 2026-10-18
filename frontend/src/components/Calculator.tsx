@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { num, price } from "@/lib/format";
+import { money, num, priceInput } from "@/lib/format";
 
 function useStored(key: string, initial: string) {
   const [v, setV] = useState(() => {
@@ -29,13 +29,13 @@ export function PositionCalculator({ entry, stop, target, defaultRisk = 0.5, com
 }) {
   const [account, setAccount] = useStored("sd-account", "10000");
   const [risk, setRisk] = useStored("sd-risk", String(defaultRisk));
-  const [e, setE] = useState(entry ? String(entry) : "");
-  const [s, setS] = useState(stop ? String(stop) : "");
-  const [t, setT] = useState(target ? String(target) : "");
+  const [e, setE] = useState(priceInput(entry));
+  const [s, setS] = useState(priceInput(stop));
+  const [t, setT] = useState(priceInput(target));
   useEffect(() => {
-    if (entry) setE(String(entry));
-    if (stop) setS(String(stop));
-    if (target) setT(String(target));
+    if (entry) setE(priceInput(entry));
+    if (stop) setS(priceInput(stop));
+    if (target) setT(priceInput(target));
   }, [entry, stop, target]);
 
   const out = useMemo(() => {
@@ -71,10 +71,10 @@ export function PositionCalculator({ entry, stop, target, defaultRisk = 0.5, com
       <div className="rounded-xl border border-line bg-raised/60 p-4">
         {out ? (
           <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
-            <dt className="text-muted">Position size</dt><dd className="num text-right text-lg font-semibold">{price(out.notional)} <span className="text-xs text-faint">USDT</span></dd>
+            <dt className="text-muted">Position size</dt><dd className="num text-right text-lg font-semibold">{money(out.notional)} <span className="text-xs text-faint">USDT</span></dd>
             <dt className="text-muted">Quantity</dt><dd className="num text-right">{num(out.qty, out.qty >= 100 ? 2 : out.qty >= 1 ? 4 : 6)}</dd>
-            <dt className="text-muted">Loss if stopped</dt><dd className="num text-right text-short">−{price(out.riskAmt)}</dd>
-            {out.reward !== null && (<><dt className="text-muted">Gain at target</dt><dd className="num text-right text-long">+{price(out.reward)}</dd></>)}
+            <dt className="text-muted">Loss if stopped</dt><dd className="num text-right text-short">−{money(out.riskAmt)}</dd>
+            {out.reward !== null && (<><dt className="text-muted">Gain at target</dt><dd className="num text-right text-long">+{money(out.reward)}</dd></>)}
             <dt className="text-muted">Stop distance</dt><dd className="num text-right">{num(out.stopDist * 100)}%</dd>
             <dt className="text-muted">Exposure</dt>
             <dd className={`num text-right ${out.leverage > 1 ? "text-warn" : ""}`}>{num(out.leverage, 2)}× account</dd>
