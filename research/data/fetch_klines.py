@@ -21,6 +21,7 @@ import argparse
 import io
 import json
 import sys
+import time
 import urllib.error
 import urllib.request
 import zipfile
@@ -139,13 +140,20 @@ PORTAL = "https://data.binance.vision/data"
 
 
 def _portal_csv(url: str) -> pd.DataFrame | None:
-    try:
-        with urllib.request.urlopen(url, timeout=120) as resp:
-            blob = resp.read()
-    except urllib.error.HTTPError as exc:
-        if exc.code == 404:
-            return None
-        raise
+    for attempt in range(5):
+        try:
+            with urllib.request.urlopen(url, timeout=120) as resp:
+                blob = resp.read()
+            break
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                return None
+            if attempt == 4:
+                raise
+        except (urllib.error.URLError, ConnectionError, TimeoutError):  # dropped connections: retry
+            if attempt == 4:
+                raise
+        time.sleep(2 ** attempt)
     with zipfile.ZipFile(io.BytesIO(blob)) as zf:
         raw = zf.read(zf.namelist()[0]).decode()
     df = pd.read_csv(io.StringIO(raw), header=None)

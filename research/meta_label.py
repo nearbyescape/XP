@@ -27,6 +27,11 @@ PARQUET = os.path.join(HERE, "data", "parquet")
 RESULTS = os.path.join(HERE, "results")
 SYMBOLS = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT",
            "ADAUSDT", "DOGEUSDT", "AVAXUSDT", "LINKUSDT", "DOTUSDT"]
+# Universe-expansion study (Oct 2026): USDT perpetuals on futures before 2021 and still trading, top 10 by
+# median daily futures volume Oct 2025 - Sep 2026. Appended, so the original coins keep their symbol_id.
+NEW10 = ["ZECUSDT", "NEARUSDT", "BCHUSDT", "FILUSDT", "AAVEUSDT",
+         "UNIUSDT", "LTCUSDT", "XLMUSDT", "TRXUSDT", "DASHUSDT"]
+UNIVERSES = {"10": SYMBOLS, "20": SYMBOLS + NEW10}
 COST = dict(entry=0.0007, tp=0.0002, exit=0.0008)  # "pro" cost model (see run_research.py)
 CAL_QUANTILES = (0.90, 0.95, 0.975)
 
@@ -128,6 +133,7 @@ def load(tf: str):
     frames = {}
     for s in SYMBOLS:
         df = pd.read_parquet(os.path.join(PARQUET, f"{s}_{tf}.parquet"))
+        df = df[df.ts <= btc.ts.max()].reset_index(drop=True)  # same end for every coin
         X = features(df, btc)
         X["symbol_id"] = SYMBOLS.index(s)
         frames[s] = (df, X)
@@ -154,11 +160,16 @@ def main():
     ap.add_argument("--bars", type=int, default=12)
     ap.add_argument("--oos", default="2025-01-01")
     ap.add_argument("--from-preds", action="store_true", help="reuse saved OOS predictions")
+    ap.add_argument("--universe", default="10", choices=sorted(UNIVERSES),
+                    help="10: the original coins; 20: + NEW10 (files tagged _u20)")
     ap.add_argument("--export", action="store_true",
                     help="train the production model on ALL data and save it to results/models/")
     args = ap.parse_args()
+    global SYMBOLS
+    SYMBOLS = UNIVERSES[args.universe]
+    args.tag = f"{args.tf}_tp{args.tp}_sl{args.sl}_b{args.bars}" + ("" if args.universe == "10" else f"_u{args.universe}")
 
-    tag = f"{args.tf}_tp{args.tp}_sl{args.sl}_b{args.bars}"
+    tag = args.tag
     preds_path = os.path.join(RESULTS, f"meta_preds_{tag}.parquet")
     frames = load(args.tf)
     rows = []
@@ -247,7 +258,7 @@ def export_model(data, feats, args, tag, end):
 
 
 def report(P, frames, args, oos0, end):
-    tag = f"{args.tf}_tp{args.tp}_sl{args.sl}_b{args.bars}"
+    tag = args.tag
     base = P.y.mean()
     print(f"\nOOS base win-rate (all bars, geometry TP{args.tp}/SL{args.sl}/{args.bars}b): {base:.3f}")
     print("OOS by predicted-probability bucket (independent, overlapping trades):")
