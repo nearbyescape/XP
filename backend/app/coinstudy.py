@@ -37,6 +37,8 @@ MIN_SIGNALS, MIN_WIN_RATE, MIN_PF, CHECK_PF = 15, 0.85, 1.0, 1.1
 STABLE = {"USDC", "FDUSD", "TUSD", "BUSD", "DAI", "USDP", "PYUSD", "USDE", "USD1", "RLUSD", "BFUSD", "XUSD",
           "EUR", "AEUR", "EURI", "GBP", "TRY", "BRL"}
 RISK = 0.005
+PACE = 0.6  # s between Binance requests: a 1,500-candle page weighs 10, so about 1,000 of the IP's 2,400 a
+            # minute, leaving the live engine (same server, same IP) well clear of the limit
 
 
 def candidates(info: dict, tickers: list[dict], exclude: set[str], listed_before: str, top: int) -> list[dict]:
@@ -63,7 +65,7 @@ def frame_of(klines, now: datetime) -> pd.DataFrame:
 
 async def download(market: BinanceMarketData, symbols: list[str], start: datetime,
                    end: datetime) -> dict[str, pd.DataFrame]:
-    sem = asyncio.Semaphore(4)  # well inside Binance's request weight limits
+    sem = asyncio.Semaphore(4)  # the market's own pacing keeps the request weight down
     frames: dict[str, pd.DataFrame] = {}
 
     async def one(sym: str) -> None:
@@ -132,7 +134,7 @@ async def run(settings: Settings, top: int = 30, listed_before: str = LISTED_BEF
               say=print) -> dict:
     now = now or datetime.now(timezone.utc)
     market = market or BinanceMarketData([u.strip() for u in settings.binance_futures_urls.split(",") if u.strip()],
-                                         "futures")
+                                         "futures", min_interval=PACE)
     current = settings.symbols
     say(f"Coin study · strategies A and B · 4H Binance USDT futures · {start} → {now:%Y-%m-%d}")
     picked = candidates(await market.exchange_info(), await market.tickers_24h(), set(current), listed_before, top)

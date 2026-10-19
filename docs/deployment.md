@@ -235,7 +235,7 @@ they were tuned on. Instead:
 |---|---|
 | Status | `docker compose ps` (engine, api and web report *healthy*) · `docker compose exec engine python -m app.cli status` · `/status` to the bot |
 | Launch checks | `docker compose exec engine python -m app.cli preflight` (after any `.env` change: `docker compose up -d` first) |
-| Coin study | `docker compose run --rm engine nice -n 10 python -m app.cli coin-study` — read-only: replays strategies A and B on the 30 most traded older Binance futures coins and says which can join `UNIVERSE` (strategy C keeps its own coins) |
+| Coin study | `docker compose run --rm engine nice -n 10 python -m app.cli coin-study` — read-only: replays strategies A and B on the 30 most traded older Binance futures coins and says which can join `UNIVERSE` (strategy C keeps its own coins). About 4 minutes: downloads are paced to stay well inside Binance's per-server limit, which the live engine shares |
 | Logs (JSON) | `docker compose logs -f engine api` |
 | Health | `curl -s http://127.0.0.1:8080/api/health` (`engine_alive` turns false if the engine misses heartbeats for 90 s) |
 | Update | `git pull && docker compose up -d --build` (migrations run automatically) |

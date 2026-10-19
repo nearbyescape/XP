@@ -22,13 +22,19 @@ KIND = {
 class BinanceMarketData:
     fine_interval = "1m"
 
-    def __init__(self, base_urls: list[str], kind: str = "spot", client: httpx.AsyncClient | None = None):
+    def __init__(self, base_urls: list[str], kind: str = "spot", client: httpx.AsyncClient | None = None,
+                 min_interval: float = 0.0):
         if kind not in KIND:
             raise ValueError(kind)
         self.kind = kind
         self.name = f"binance_{kind}"
         self.base_urls = base_urls
         self._preferred = 0
+        # Seconds between requests (0: no pacing). Bulk downloads share the server's IP weight limit
+        # with the live engine, and Binance bans an IP that keeps hitting it (HTTP 418).
+        self.min_interval = min_interval
+        self._pace = asyncio.Lock()
+        self._next_at = 0.0
         self.client = client or httpx.AsyncClient(
             timeout=httpx.Timeout(15.0, connect=5.0),
             headers={"User-Agent": "signaldesk-engine/1.0"},
@@ -37,11 +43,22 @@ class BinanceMarketData:
     async def close(self) -> None:
         await self.client.aclose()
 
+    async def _wait_turn(self) -> None:
+        if not self.min_interval:
+            return
+        async with self._pace:
+            loop = asyncio.get_running_loop()
+            wait = self._next_at - loop.time()
+            if wait > 0:
+                await asyncio.sleep(wait)
+            self._next_at = loop.time() + self.min_interval
+
     async def _get(self, path: str, params: dict) -> object:
         last_exc: Exception | None = None
         for attempt in range(6):
             base = self.base_urls[(self._preferred + attempt) % len(self.base_urls)]
             try:
+                await self._wait_turn()
                 r = await self.client.get(base + path, params=params)
                 if r.status_code in (418, 429):
                     wait = int(r.headers.get("Retry-After", "5"))

@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timezone
 
 import httpx
@@ -90,3 +91,19 @@ async def test_study_runs_end_to_end_without_writing_anything():
                              and (c["selection"]["pf"] is None or c["selection"]["pf"] >= 1.0))
     if out["recommend"]:
         assert "UNIVERSE=BTCUSDT,ETHUSDT," in text
+
+
+async def test_bulk_downloads_are_paced():
+    """The study shares the server's Binance weight limit with the live engine: requests go out spaced."""
+    sent = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(asyncio.get_running_loop().time())
+        return httpx.Response(200, json={"symbols": []})
+
+    market = BinanceMarketData(["https://fapi.test"], "futures", min_interval=0.05,
+                               client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    await asyncio.gather(*(market.exchange_info() for _ in range(4)))
+    gaps = np.diff(sorted(sent))
+    assert len(sent) == 4 and gaps.min() >= 0.045
+    assert 60 / coinstudy.PACE * 10 < 2400 / 2  # klines pages of weight 10: under half the IP limit
