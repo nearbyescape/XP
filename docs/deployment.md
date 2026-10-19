@@ -29,10 +29,10 @@ dashboard and Telegram, then tracks each one to its target, stop or time limit.
 
 - Linux with Docker Engine 24+ and the Compose plugin.
 - 2 vCPU, 2 GB RAM, 10 GB disk is enough for the 10-coin universe.
-- Outbound HTTPS to Binance (`data-api.binance.vision`, `api.binance.com`) and `api.telegram.org`.
-  Binance blocks some regions (e.g. the US) on `api.binance.com`; `data-api.binance.vision` (the default
-  first host) is the public market-data mirror and works more widely. If you set
-  `MARKET_DATA_SOURCE=binance_futures`, the server must be in a region allowed by Binance Futures.
+- Outbound HTTPS to Binance Futures (`fapi.binance.com`, the default market data) and
+  `api.telegram.org`. Binance refuses some regions (e.g. the US): host the server in a region it
+  serves (Mumbai, Singapore, the EU), or set `MARKET_DATA_SOURCE=binance_spot`, whose public mirror
+  `data-api.binance.vision` works more widely. `preflight` (§2) tells you which applies.
 - A domain name if you want HTTPS (recommended).
 
 ## 2. First deployment
