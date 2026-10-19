@@ -84,6 +84,13 @@ class BinanceMarketData:
             cursor = datetime.fromtimestamp(batch[-1].open_time.timestamp() + step, tz=cursor.tzinfo)
         return out
 
+    async def exchange_info(self) -> dict:
+        """Contract list (futures: listing dates in `onboardDate`, contract and underlying types)."""
+        return await self._get({"spot": "/api/v3/exchangeInfo", "futures": "/fapi/v1/exchangeInfo"}[self.kind], {})
+
+    async def tickers_24h(self) -> list[dict]:
+        return await self._get({"spot": "/api/v3/ticker/24hr", "futures": "/fapi/v1/ticker/24hr"}[self.kind], {})
+
     async def prices(self, symbols: list[str]) -> dict[str, float]:
         if self.kind == "spot":
             raw = await self._get(KIND["spot"]["price"], {"symbols": json.dumps(symbols, separators=(",", ":"))})

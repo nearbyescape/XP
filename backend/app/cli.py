@@ -5,6 +5,7 @@
     python -m app.cli telegram-test [--chat @channel]              # send a test message now
     python -m app.cli status                                       # engine / strategy summary
     python -m app.cli preflight [--send]                           # launch checks (exit 1 on failure)
+    python -m app.cli coin-study [--top 30]                        # which extra coins can run A and B
 """
 
 from __future__ import annotations
@@ -129,6 +130,12 @@ async def preflight(send: bool) -> None:
         raise SystemExit(code)
 
 
+async def coin_study(top: int, listed_before: str) -> None:
+    from . import coinstudy
+
+    await coinstudy.run(get_settings(), top=top, listed_before=listed_before)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(prog="python -m app.cli")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -142,6 +149,9 @@ def main() -> None:
     sub.add_parser("status")
     p = sub.add_parser("preflight", help="check config, database, model, Binance and Telegram before launch")
     p.add_argument("--send", action="store_true", help="also send a test message to each admin chat")
+    p = sub.add_parser("coin-study", help="replay strategies A and B on more Binance futures coins (read-only)")
+    p.add_argument("--top", type=int, default=30)
+    p.add_argument("--listed-before", default="2023-01-01")
     sub.add_parser("create-tables", help="SQLite/dev only; production uses `alembic upgrade head`")
     args = ap.parse_args()
 
@@ -154,6 +164,7 @@ def main() -> None:
         "telegram-test": lambda: telegram_test(args.chat),
         "status": status,
         "preflight": lambda: preflight(args.send),
+        "coin-study": lambda: coin_study(args.top, args.listed_before),
         "create-tables": db.create_all,
     }[args.cmd]()
     asyncio.run(coro)
