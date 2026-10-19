@@ -13,6 +13,7 @@ SYMBOLS = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT",
            "ADAUSDT", "DOGEUSDT", "AVAXUSDT", "LINKUSDT", "DOTUSDT"]
 
 os.environ.setdefault("ENVIRONMENT", "test")
+os.environ.setdefault("SITE_PRIVATE", "false")  # tests opt in to the private site where they test it
 os.environ.setdefault("SECRET_KEY", "test-secret-key-with-at-least-32-characters")
 
 needs_data = pytest.mark.skipif(not (DATA / "BTCUSDT_4h.parquet").exists(),

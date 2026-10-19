@@ -318,3 +318,23 @@ async def test_session_greeting_and_summary(service, monkeypatch):
     async with db.sessions()() as s:
         rows = (await s.scalars(select(TelegramOutbox).where(TelegramOutbox.kind == "session_start"))).all()
     assert len(rows) == 1 and rows[0].chat_id == "@signals"
+
+
+async def test_private_site_has_no_website_links(service):
+    svc, _ = service
+    private = Settings(telegram_bot_token="TOKEN", telegram_channel_id="@signals", environment="test",
+                       public_base_url="https://signals.example.com", site_private=True)
+    psvc = TelegramService(private, FixedClock(NOW), svc.client)
+    assert svc.site_url == "https://signals.example.com" and psvc.site_url is None
+    async with db.sessions()() as s:
+        sig = signal(id=None, uid="RSR-4H:SOLUSDT:private")
+        s.add(sig)
+        await s.flush()
+        await psvc.enqueue_signal_new(s, sig)
+        await s.commit()
+        row = (await s.scalars(select(TelegramOutbox).where(TelegramOutbox.signal_id == sig.id))).one()
+    assert row.reply_markup is None
+    rules = fmt.rules(psvc.style)
+    assert "website" not in rules and "Position size = account × 0.5% ÷ distance from entry to stop" in rules
+    assert "10,000 × 0.5% ÷ 7.5% = 667" in rules
+    assert "calculator on the website" in fmt.rules(svc.style)

@@ -11,16 +11,17 @@ import json
 import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 
 from .. import db
 from ..models import Signal, SystemState
+from . import auth
 from .serialize import signal_out
 
 log = logging.getLogger(__name__)
-router = APIRouter(prefix="/api")
+router = APIRouter(prefix="/api", dependencies=[Depends(auth.require_site_access)])
 
 
 def _json(obj) -> str:

@@ -118,6 +118,13 @@ def clear(response: Response, settings: Settings) -> None:
     response.delete_cookie(COOKIE, path="/api", secure=settings.cookie_secure, httponly=True, samesite="strict")
 
 
+def require_site_access(request: Request, settings: Settings = Depends(get_settings)) -> str | None:
+    """The dashboard's data and live stream: open when the site is public, the admin session otherwise."""
+    if not settings.site_private:
+        return None
+    return require_admin(request, settings)
+
+
 def require_admin(request: Request, settings: Settings = Depends(get_settings)) -> str:
     token = request.cookies.get(COOKIE)
     if not token:

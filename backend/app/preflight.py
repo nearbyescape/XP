@@ -43,9 +43,12 @@ def config_checks(settings: Settings) -> list[Check]:
                Check(WARN, "ADMIN_PASSWORD", "shorter than 12 characters") if len(pw) < 12 else
                Check(PASS, "ADMIN_PASSWORD", "set"))
     url = settings.public_base_url
-    out.append(Check(WARN, "PUBLIC_BASE_URL", f"{url}: use your https:// domain; 'Open signal' buttons stay hidden "
-                                              "until then")
+    out.append(Check(WARN, "PUBLIC_BASE_URL", f"{url}: use your https:// domain" + (
+        "" if settings.site_private else "; 'Open signal' buttons stay hidden until then"))
                if not url.startswith("https://") or "example." in url else Check(PASS, "PUBLIC_BASE_URL", url))
+    out.append(Check(PASS, "Website access", "private: every page and the API need the admin login")
+               if settings.site_private else
+               Check(WARN, "Website access", "public: anyone with the address sees the signals (SITE_PRIVATE=false)"))
     out.append(Check(PASS, "ENVIRONMENT", "production") if settings.environment == "production" else
                Check(WARN, "ENVIRONMENT", f"{settings.environment} (production expected)"))
     out.append(Check(FAIL, "MARKET_DATA_SOURCE", "replay is for demos; use binance_futures") if settings.is_replay

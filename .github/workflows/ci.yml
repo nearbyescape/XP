@@ -78,7 +78,10 @@ jobs:
           docker compose up -d --wait db api web
           curl -fsS http://127.0.0.1:8080/api/health
           curl -fsSI http://127.0.0.1:8080/ | grep -i "^x-robots-tag: noindex"
-          curl -fsSI http://127.0.0.1:8080/api/meta | grep -i "^x-robots-tag: noindex"
+          curl -fsS -o /dev/null -D - http://127.0.0.1:8080/api/health | grep -i "^x-robots-tag: noindex"
+          # private site (default): the dashboard's data needs the admin login
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/api/meta)" = "401"
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/api/signals)" = "401"
           curl -fsS http://127.0.0.1:8080/robots.txt | grep -qx "Disallow: /"
           curl -fsS http://127.0.0.1:8080/ | grep -q 'name="robots" content="noindex'
       - if: failure()

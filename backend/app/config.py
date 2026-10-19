@@ -94,6 +94,9 @@ class Settings(BaseSettings):
     cookie_secure: bool = True
     # false (default) | deindex | true — mirrors the nginx policy; anything but "true" adds noindex
     search_indexing: Literal["false", "deindex", "true"] = "false"
+    # true (default): every page and API endpoint needs the admin login, and Telegram posts carry no
+    # link to the website. false: the dashboard is readable by anyone with the address.
+    site_private: bool = True
 
     @field_validator("session_start", "session_end")
     @classmethod

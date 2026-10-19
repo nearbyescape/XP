@@ -52,6 +52,7 @@ export interface Meta {
   model: { version: string; threshold: number } | null;
   telegram: { enabled: boolean; channel_url: string | null; bot_username: string | null };
   default_risk_pct: number;
+  private: boolean; // every page needs the admin login
   risk: {
     risk_pct: number; // suggested risk per signal, % of the account
     max_open_risk_pct: number; // member rule: total across signals still before TP1

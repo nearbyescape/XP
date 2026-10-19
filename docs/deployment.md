@@ -153,9 +153,17 @@ are unsubscribed automatically. Delivery goes through a database outbox, paced t
 limits (≈20 messages/min per channel, ≈25/s overall) and retried with backoff, so nothing is lost
 during a Telegram outage or an engine restart.
 
-## 4. Search-engine blocking (default)
+## 4. Private site and search-engine blocking (both default)
 
-`SEARCH_INDEXING=false` (the default) applies four layers:
+**Private site.** With `SITE_PRIVATE=true` (the default) the website is for you only: a visitor sees
+a neutral sign-in screen (no name, no figures), and every page, API endpoint and the live stream
+need the admin login (password + security question). Only `/api/health` (no data) stays open for
+the container health checks. Members follow the Telegram channel; its posts carry no website link,
+and the pinned rules give the sizing formula instead of pointing to the calculator. The admin
+session lasts `SESSION_HOURS` (12); after that the site asks to sign in again. Set
+`SITE_PRIVATE=false` to make the dashboard readable by anyone with the address.
+
+**Search engines.** `SEARCH_INDEXING=false` (the default) applies four layers:
 
 1. `robots.txt` → `Disallow: /` for every crawler, with AI/dataset crawlers (GPTBot, CCBot,
    ClaudeBot, Google-Extended, …) also named explicitly.

@@ -14,7 +14,8 @@ from app.telegram.client import TelegramClient
 MODEL = "../research/results/models/mlr_4h_tp0.5_sl3.0_b24"
 GOOD = dict(secret_key="x" * 40, admin_password="a long admin password", public_base_url="https://signals.nearby.io",
             app_name="NearbyEscape Signals", telegram_bot_token="TOKEN", telegram_channel_id="@signals",
-            telegram_admin_chat_ids="42", universe="BTCUSDT,ETHUSDT", model_path=MODEL, environment="production")
+            telegram_admin_chat_ids="42", universe="BTCUSDT,ETHUSDT", model_path=MODEL, environment="production",
+            site_private=True)
 
 
 def by_name(checks):

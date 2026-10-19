@@ -82,12 +82,14 @@ class Style:
     risk_pct: float = 0.5           # suggested risk per signal, % of the account
     max_open_risk_pct: float = 5.0  # member rule: total across signals still before TP1
     risk_note_signals: int = 10     # signal posts note high open risk from this many before TP1
+    website: bool = True            # members can open the website (false: the site is private)
 
     @classmethod
     def from_settings(cls, settings) -> Style:
         return cls(settings.app_name, Session.from_settings(settings),
                    MARKETS.get(settings.market_data_source, "Binance"), settings.entry_window_minutes,
-                   settings.default_risk_pct, settings.max_open_risk_pct, settings.risk_note_signals)
+                   settings.default_risk_pct, settings.max_open_risk_pct, settings.risk_note_signals,
+                   not settings.site_private)
 
 
 # ---------------------------------------------------------------------------------- signals
@@ -307,11 +309,13 @@ def rules(style: Style) -> str:
         "1. Place your stop on the exchange as soon as you enter: a stop-market order, reduce-only. "
         "Never a mental stop.",
         f"2. Risk {style.risk_pct:g}% of your account per signal ({style.risk_pct / 2:g}% while you are new). "
-        "The calculator on the website sizes the trade.",
+        + ("The calculator on the website sizes the trade." if style.website else
+           f"Position size = account × {style.risk_pct:g}% ÷ distance from entry to stop (in %); e.g. "
+           f"10,000 × {style.risk_pct:g}% ÷ 7.5% = {10_000 * style.risk_pct / 7.5:,.0f}."),
         f"3. Keep your total open risk under {style.max_open_risk_pct:g}%. Signals still before TP1 count: "
         f"at {style.risk_pct:g}% each that is {most} signals.",
-        "4. Use isolated margin. Calculator sizing needs no extra leverage, so the stop sits far from "
-        "liquidation.",
+        "4. Use isolated margin. Sized this way the trade needs no extra leverage, so the stop sits far "
+        "from liquidation.",
         "5. When TP1 fills, move the stop to entry. If the entry window has passed, skip the signal.",
         "",
         "<i>Results are recorded at the published levels. Not investment advice.</i>",

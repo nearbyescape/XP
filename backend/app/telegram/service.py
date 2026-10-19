@@ -58,6 +58,11 @@ class TelegramService:
         return self.settings.overnight_updates == "silent" and not self.style.session.contains(at)
 
     @property
+    def site_url(self) -> str | None:
+        """Website address for "Open signal" buttons; none while the site is private (login only)."""
+        return None if self.settings.site_private else self.settings.public_base_url
+
+    @property
     def enabled(self) -> bool:
         return self.client is not None
 
@@ -75,7 +80,7 @@ class TelegramService:
         if not self.enabled or not sig.published:
             return
         text = fmt.new_signal(sig, self.style)
-        kb = fmt.signal_keyboard(self.settings.public_base_url, sig.id)
+        kb = fmt.signal_keyboard(self.site_url, sig.id)
         for chat in await self._targets(s):
             s.add(TelegramOutbox(chat_id=chat, kind="signal_new", signal_id=sig.id, text=text,
                                  reply_markup=kb, next_attempt_at=utcnow()))
@@ -87,7 +92,7 @@ class TelegramService:
         chats = (await s.scalars(select(TelegramOutbox.chat_id).where(
             TelegramOutbox.signal_id == sig.id, TelegramOutbox.kind == "signal_new",
             TelegramOutbox.status.in_(["sent", "pending"])))).all()
-        kb = fmt.signal_keyboard(self.settings.public_base_url, sig.id)
+        kb = fmt.signal_keyboard(self.site_url, sig.id)
         silent = self._quiet(at)
         for chat in dict.fromkeys(chats):
             s.add(TelegramOutbox(chat_id=chat, kind="signal_edit", signal_id=sig.id,

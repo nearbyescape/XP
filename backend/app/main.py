@@ -52,6 +52,7 @@ def create_app() -> FastAPI:
         body = "User-agent: *\nAllow: /\n" if crawlable else "User-agent: *\nDisallow: /\n"
         return PlainTextResponse(body)
 
+    app.include_router(public.open_router)
     app.include_router(public.router)
     app.include_router(stream.router)
     app.include_router(admin.router)

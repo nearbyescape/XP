@@ -216,3 +216,24 @@ async def test_risk_guard_endpoints(client):
     assert "publishing.paused" in [e["kind"] for e in ov["events"]]
     assert (await client.post("/api/admin/telegram/rules", headers=h)).status_code == 409  # no bot token
     assert (await client.put("/api/admin/publishing", json={"paused": False}, headers=h)).json()["paused"] is False
+
+
+async def test_private_site_needs_the_login(client, monkeypatch):
+    monkeypatch.setenv("SITE_PRIVATE", "true")
+    get_settings.cache_clear()
+    closed = ["/api/meta", "/api/signals", "/api/signals/1", "/api/signals.csv", "/api/stats", "/api/stats/equity",
+              "/api/stats/monthly", "/api/regime", "/api/prices", "/api/candles?symbol=BTCUSDT", "/api/stream"]
+    for path in closed:
+        assert (await client.get(path)).status_code == 401, path
+    health = await client.get("/api/health")
+    assert health.status_code == 200 and set(health.json()) == {"status", "db", "engine_alive",
+                                                                 "engine_heartbeat_age_s"}
+    assert (await client.get("/api/admin/captcha")).status_code == 200  # the login itself stays reachable
+    assert (await client.get("/robots.txt")).text == "User-agent: *\nDisallow: /\n"
+    assert (await login(client)).status_code == 204
+    meta = (await client.get("/api/meta")).json()
+    assert meta["private"] is True
+    for path in closed[:-1]:  # (the live stream never ends; its 401 above is the check)
+        assert (await client.get(path)).status_code in (200, 404), path
+    await client.post("/api/admin/logout")
+    assert (await client.get("/api/signals")).status_code == 401

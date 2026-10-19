@@ -1,5 +1,7 @@
 import clsx from "clsx";
-import { Activity, Menu, Moon, Send, Sun, X } from "lucide-react";
+import { Activity, LogOut, Menu, Moon, Send, Sun, X } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { api } from "@/lib/api";
 import { useEffect, useState, type ReactNode } from "react";
 import { Link, NavLink, useLocation } from "react-router-dom";
 import { useMeta } from "@/lib/queries";
@@ -87,6 +89,10 @@ function Toasts() {
 
 export function Layout({ children }: { children: ReactNode }) {
   const { data: meta } = useMeta();
+  const qc = useQueryClient();
+  // reset (not just drop) every query: the overview metadata is refetched, answers 401 and the
+  // private site falls back to the sign-in screen
+  const signOut = () => api.admin.logout().finally(() => qc.resetQueries());
   const { theme, toggle } = useTheme();
   const [open, setOpen] = useState(false);
   const loc = useLocation();
@@ -128,6 +134,7 @@ export function Layout({ children }: { children: ReactNode }) {
               </a>
             )}
             <button className="btn px-2" onClick={toggle} aria-label="Toggle theme">{theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}</button>
+            {meta?.private && <button className="btn px-2" onClick={signOut} aria-label="Sign out" title="Sign out"><LogOut size={15} /></button>}
             <button className="btn px-2 md:hidden" onClick={() => setOpen((o) => !o)} aria-label="Menu">{open ? <X size={15} /> : <Menu size={15} />}</button>
           </div>
         </div>

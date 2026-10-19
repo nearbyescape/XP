@@ -21,9 +21,11 @@ from ..db import get_session
 from ..market.base import floor_time
 from ..models import Candle, Signal
 from ..services import repo
+from . import auth
 from .serialize import CSV_COLUMNS, kpis_out, signal_out
 
-router = APIRouter(prefix="/api")
+router = APIRouter(prefix="/api", dependencies=[Depends(auth.require_site_access)])
+open_router = APIRouter(prefix="/api")  # container health checks: no data, never behind the login
 
 Origin = Literal["default", "live", "demo", "backfill", "all"]
 
@@ -76,7 +78,7 @@ async def meta(s: AsyncSession = Depends(get_session), settings: Settings = Depe
         "model": {"version": hb.get("model"), "threshold": hb.get("model_threshold")} if hb.get("model") else None,
         "telegram": {"enabled": settings.telegram_enabled, "channel_url": settings.telegram_channel_url,
                      "bot_username": tg.get("bot")},
-        "default_risk_pct": settings.default_risk_pct,
+        "default_risk_pct": settings.default_risk_pct, "private": settings.site_private,
         "risk": {"risk_pct": settings.default_risk_pct, "max_open_risk_pct": settings.max_open_risk_pct,
                  "note_signals": settings.risk_note_signals},
         "publishing": {"paused": bool((await repo.publishing(s)).get("paused"))},
@@ -244,7 +246,7 @@ async def get_candles(symbol: str, limit: int = Query(300, ge=10, le=1500), end:
              "v": r.volume} for r in rows]
 
 
-@router.get("/health")
+@open_router.get("/health")
 async def health(s: AsyncSession = Depends(get_session)):
     await s.execute(select(1))
     alive, age = heartbeat_alive(await repo.get_state(s, "heartbeat"))

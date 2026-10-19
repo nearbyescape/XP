@@ -46,8 +46,9 @@ Signals are published during a session, **09:00 AM – 11:00 PM IST** by default
 SL updates as replies (silent overnight), and a summary of the day at the end. See
 [deployment §3](docs/deployment.md#3-telegram-with-botfather).
 
-Search engines are blocked by default (robots.txt + `X-Robots-Tag` + meta tag). See
-[deployment §4](docs/deployment.md#4-search-engine-blocking-default).
+The website is private by default: everything sits behind the admin login (password and a
+self-hosted arithmetic question), and search engines are blocked (robots.txt + `X-Robots-Tag` + meta
+tag). See [deployment §4](docs/deployment.md#4-private-site-and-search-engine-blocking-both-default).
 
 ## Development
 
