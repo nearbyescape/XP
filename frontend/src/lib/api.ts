@@ -71,8 +71,12 @@ export const api = {
   candles: (symbol: string, limit = 300, end?: string) => request<Candle[]>("/candles", { query: { symbol, limit, end } }),
 
   admin: {
-    login: (username: string, password: string) =>
-      request<void>("/admin/login", { method: "POST", body: JSON.stringify({ username, password }) }),
+    captcha: () => request<{ question: string; token: string; expires_in: number }>("/admin/captcha"),
+    login: (username: string, password: string, captcha_token: string, captcha_answer: string) =>
+      request<void>("/admin/login", {
+        method: "POST",
+        body: JSON.stringify({ username, password, captcha_token, captcha_answer }),
+      }),
     logout: () => request<void>("/admin/logout", { method: "POST" }),
     me: () => request<{ username: string }>("/admin/me"),
     overview: () => request<AdminOverview>("/admin/overview"),

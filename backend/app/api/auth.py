@@ -1,12 +1,15 @@
 """Admin session: password from ADMIN_PASSWORD, signed JWT in an httpOnly SameSite=Strict cookie.
 
 Mutating admin requests must also carry `X-Requested-With: SignalDesk` (CSRF defence in depth).
-Failed logins are rate limited per client IP.
+The login form also answers a small arithmetic question (self-hosted captcha, no third party).
+Failed logins and wrong answers are rate limited per client IP.
 """
 
 from __future__ import annotations
 
+import hashlib
 import hmac
+import secrets
 import time
 from collections import defaultdict, deque
 
@@ -20,6 +23,8 @@ CSRF_HEADER = "x-requested-with"
 CSRF_VALUE = "SignalDesk"
 _failures: dict[str, deque] = defaultdict(deque)
 MAX_FAILURES, WINDOW_S = 8, 900
+CAPTCHA_TTL_S = 300
+_used_captchas: dict[str, float] = {}  # id -> expiry: each question is accepted once
 
 
 def client_ip(request: Request) -> str:
@@ -50,6 +55,55 @@ def verify_password(settings: Settings, username: str, password: str) -> bool:
     ok_user = hmac.compare_digest(username.encode(), settings.admin_username.encode())
     ok_pass = hmac.compare_digest(password.encode(), settings.admin_password.get_secret_value().encode())
     return ok_user and ok_pass
+
+
+def _captcha_mac(settings: Settings, cid: str, answer: int) -> str:
+    key = settings.secret_key.get_secret_value().encode()
+    return hmac.new(key, f"captcha:{cid}:{answer}".encode(), hashlib.sha256).hexdigest()
+
+
+def new_captcha(settings: Settings) -> dict:
+    """A small sum, product or difference. The token carries a keyed hash of the answer (the 80-odd
+    possible answers cannot be tried offline without SECRET_KEY), an id and a 5-minute expiry."""
+    op = secrets.choice("+−×")
+    if op == "+":
+        a, b = 2 + secrets.randbelow(18), 2 + secrets.randbelow(8)
+        answer = a + b
+    elif op == "−":
+        b = 2 + secrets.randbelow(8)
+        a = b + 1 + secrets.randbelow(12)
+        answer = a - b
+    else:
+        a, b = 2 + secrets.randbelow(8), 2 + secrets.randbelow(5)
+        answer = a * b
+    cid, now = secrets.token_urlsafe(12), int(time.time())
+    token = jwt.encode({"scope": "captcha", "jti": cid, "h": _captcha_mac(settings, cid, answer),
+                        "exp": now + CAPTCHA_TTL_S}, settings.secret_key.get_secret_value(), algorithm="HS256")
+    return {"question": f"{a} {op} {b}", "token": token, "expires_in": CAPTCHA_TTL_S}
+
+
+def check_captcha(settings: Settings, token: str, answer: str) -> None:
+    """Raise 400 unless `answer` solves the question in `token`, which is unexpired and unused."""
+    try:
+        claims = jwt.decode(token, settings.secret_key.get_secret_value(), algorithms=["HS256"])
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "the security question expired, answer the new one") from None
+    except jwt.PyJWTError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "invalid security question") from None
+    now = time.time()
+    for cid, exp in list(_used_captchas.items()):
+        if exp < now:
+            del _used_captchas[cid]
+    cid = str(claims.get("jti", ""))
+    if claims.get("scope") != "captcha" or not cid or cid in _used_captchas:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "invalid security question")
+    _used_captchas[cid] = float(claims.get("exp", now + CAPTCHA_TTL_S))
+    try:
+        value = int(answer.strip().replace("−", "-"))
+    except ValueError:
+        value = None
+    if value is None or not hmac.compare_digest(_captcha_mac(settings, cid, value), str(claims.get("h", ""))):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "wrong answer to the security question")
 
 
 def issue(response: Response, settings: Settings, username: str) -> None:

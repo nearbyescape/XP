@@ -286,8 +286,11 @@ published, and excluded from live statistics unless "+ Backfill" is selected.
 - [ ] `./backups` fills daily (`ls backups/`) and is copied off the server.
 - [ ] `TELEGRAM_ADMIN_CHAT_IDS` is set, so outages reach you on Telegram.
 
-The admin session is an httpOnly, SameSite=Strict cookie. Mutating requests also require an
-`X-Requested-With` header. nginx sends a strict Content-Security-Policy (no inline scripts, no
+The admin login also asks a small arithmetic question (a self-hosted captcha: no third-party
+service, nothing extra loaded in the browser). Each question works once and expires after 5 minutes,
+its answer is signed with `SECRET_KEY` so it cannot be read from the page, and wrong answers count
+toward the login rate limit. The admin session is an httpOnly, SameSite=Strict cookie. Mutating
+requests also require an `X-Requested-With` header. nginx sends a strict Content-Security-Policy (no inline scripts, no
 third-party origins; fonts are self-hosted), `X-Frame-Options: DENY`, `nosniff` and a restrictive
 Permissions-Policy.
 

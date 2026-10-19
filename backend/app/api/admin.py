@@ -26,6 +26,15 @@ router = APIRouter(prefix="/api/admin")
 class Login(BaseModel):
     username: str = Field(max_length=128)
     password: str = Field(max_length=256)
+    captcha_token: str = Field(max_length=1024)
+    captcha_answer: str = Field(max_length=16)
+
+
+@router.get("/captcha")
+async def captcha(response: Response, settings: Settings = Depends(get_settings)):
+    """The login form's security question (self-hosted; no third-party captcha service)."""
+    response.headers["Cache-Control"] = "no-store"
+    return auth.new_captcha(settings)
 
 
 @router.post("/login", status_code=204)
@@ -33,6 +42,13 @@ async def login(body: Login, request: Request, response: Response, settings: Set
                 s: AsyncSession = Depends(get_session)):
     ip = auth.client_ip(request)
     auth.check_rate(ip)
+    try:
+        auth.check_captcha(settings, body.captcha_token, body.captcha_answer)
+    except HTTPException:
+        auth.record_failure(ip)
+        await repo.log_event(s, "warning", "admin.captcha_failed", f"wrong or reused security answer from {ip}")
+        await s.commit()
+        raise
     if not auth.verify_password(settings, body.username, body.password):
         auth.record_failure(ip)
         await repo.log_event(s, "warning", "admin.login_failed", f"failed admin login from {ip}")

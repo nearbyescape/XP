@@ -1,6 +1,6 @@
 import clsx from "clsx";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { KeyRound, LogOut, Pause, Pin, Play, RefreshCw, Send, ShieldCheck } from "lucide-react";
+import { KeyRound, LogOut, Pause, Pin, Play, RefreshCw, RotateCw, Send, ShieldCheck } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { api, ApiError } from "@/lib/api";
 import { ago, duration, num, stamp, tz } from "@/lib/format";
@@ -12,9 +12,17 @@ function Login() {
   const qc = useQueryClient();
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("");
+  const [answer, setAnswer] = useState("");
+  // security question: a new one on load, after every failed attempt and on request (each works once)
+  const captcha = useQuery({ queryKey: ["admin-captcha"], queryFn: api.admin.captcha, staleTime: Infinity, refetchOnWindowFocus: false });
+  const newQuestion = () => {
+    setAnswer("");
+    captcha.refetch();
+  };
   const login = useMutation({
-    mutationFn: () => api.admin.login(username, password),
+    mutationFn: () => api.admin.login(username, password, captcha.data?.token ?? "", answer.trim()),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["admin"] }),
+    onError: newQuestion,
   });
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -33,8 +41,21 @@ function Login() {
         <form onSubmit={submit} className="space-y-3">
           <label className="block"><span className="label">Username</span><input className="input mt-1.5" autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} /></label>
           <label className="block"><span className="label">Password</span><input className="input mt-1.5" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} autoFocus /></label>
+          <label className="block">
+            <span className="label">Security check</span>
+            <div className="mt-1.5 flex items-center gap-2">
+              <span className="num flex h-[38px] min-w-[7.5rem] select-none items-center justify-center rounded-lg border border-line bg-raised px-3 text-sm font-semibold tracking-wide" aria-live="polite">
+                {captcha.data ? `${captcha.data.question} =` : captcha.isError ? "unavailable" : "…"}
+              </span>
+              <input className="input num" inputMode="numeric" autoComplete="off" placeholder="?" aria-label="Answer" maxLength={4}
+                value={answer} onChange={(e) => setAnswer(e.target.value.replace(/[^0-9]/g, ""))} />
+              <button type="button" className="btn shrink-0 px-2.5" onClick={newQuestion} title="New question" aria-label="New question">
+                <RotateCw size={14} className={captcha.isFetching ? "animate-spin" : ""} />
+              </button>
+            </div>
+          </label>
           {login.error && <p className="text-sm text-short">{(login.error as ApiError).message}</p>}
-          <button className="btn btn-primary w-full" disabled={login.isPending || !password}>{login.isPending ? "Signing in…" : "Sign in"}</button>
+          <button className="btn btn-primary w-full" disabled={login.isPending || !password || !answer || !captcha.data}>{login.isPending ? "Signing in…" : "Sign in"}</button>
         </form>
       </Card>
     </div>

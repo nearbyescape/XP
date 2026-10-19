@@ -20,6 +20,19 @@ def make_signal(i, **kw):
     return Signal(**base)
 
 
+def solve(question: str) -> int:
+    a, op, b = question.split()
+    return {"+": int(a) + int(b), "−": int(a) - int(b), "×": int(a) * int(b)}[op]
+
+
+async def login(client, password="correct horse", username="admin", answer=None, headers=None):
+    """Sign in through the security question, as the login form does."""
+    cap = (await client.get("/api/admin/captcha")).json()
+    return await client.post("/api/admin/login", headers=headers, json={
+        "username": username, "password": password, "captcha_token": cap["token"],
+        "captcha_answer": str(solve(cap["question"]) if answer is None else answer)})
+
+
 @pytest.fixture
 async def client(tmp_path, monkeypatch):
     monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{tmp_path}/api.db")
@@ -100,9 +113,9 @@ async def test_stats(client):
 
 async def test_admin_flow(client):
     assert (await client.get("/api/admin/overview")).status_code == 401
-    bad = await client.post("/api/admin/login", json={"username": "admin", "password": "nope"})
+    bad = await login(client, password="nope")
     assert bad.status_code == 401
-    ok = await client.post("/api/admin/login", json={"username": "admin", "password": "correct horse"})
+    ok = await login(client)
     assert ok.status_code == 204 and "sd_session" in ok.headers["set-cookie"]
     assert "httponly" in ok.headers["set-cookie"].lower()
     ov = (await client.get("/api/admin/overview")).json()
@@ -121,10 +134,47 @@ async def test_admin_flow(client):
 async def test_login_rate_limit(client):
     # rotating a spoofed X-Forwarded-For must not reset the limit
     for i in range(8):
-        await client.post("/api/admin/login", json={"username": "x", "password": "y"},
-                          headers={"X-Forwarded-For": f"10.0.0.{i}"})
-    r = await client.post("/api/admin/login", json={"username": "admin", "password": "correct horse"})
+        await login(client, username="x", password="y", headers={"X-Forwarded-For": f"10.0.0.{i}"})
+    r = await login(client)
     assert r.status_code == 429
+
+
+async def test_login_security_question(client):
+    import jwt as pyjwt
+
+    from app.api import auth
+
+    cap = (await client.get("/api/admin/captcha")).json()
+    assert cap["expires_in"] == 300 and len(cap["question"].split()) == 3
+    assert "no-store" in (await client.get("/api/admin/captcha")).headers["cache-control"]
+    assert solve(cap["question"]) > 0
+    # the answer is not readable from the token (keyed hash, not the plain answer)
+    claims = pyjwt.decode(cap["token"], options={"verify_signature": False})
+    assert str(solve(cap["question"])) not in claims.values()
+
+    async def post(token, answer, password="correct horse"):
+        return await client.post("/api/admin/login", json={"username": "admin", "password": password,
+                                                            "captcha_token": token, "captcha_answer": answer})
+    wrong = await post(cap["token"], str(solve(cap["question"]) + 1))
+    assert wrong.status_code == 400 and "wrong answer" in wrong.json()["detail"]
+    reused = await post(cap["token"], str(solve(cap["question"])))  # one attempt per question
+    assert reused.status_code == 400 and "invalid" in reused.json()["detail"]
+    assert (await post("not-a-token", "5")).status_code == 400
+    cap = (await client.get("/api/admin/captcha")).json()
+    forged = pyjwt.encode({**pyjwt.decode(cap["token"], options={"verify_signature": False}), "h": "0" * 64},
+                          "another-secret-key-with-at-least-32-chars", algorithm="HS256")
+    assert (await post(forged, str(solve(cap["question"])))).status_code == 400
+    expired = pyjwt.encode({"scope": "captcha", "jti": "x", "h": "0", "exp": 1},
+                           get_settings().secret_key.get_secret_value(), algorithm="HS256")
+    assert "expired" in (await post(expired, "1")).json()["detail"]
+    missing = await client.post("/api/admin/login", json={"username": "admin", "password": "correct horse"})
+    assert missing.status_code == 422
+    assert (await login(client)).status_code == 204  # the right answer still signs in
+    # wrong answers count toward the login rate limit
+    auth._failures.clear()
+    for _ in range(8):
+        await login(client, answer="-1")
+    assert (await login(client)).status_code == 429
 
 
 async def test_targets_in_signal_and_stats(client):
@@ -155,7 +205,7 @@ async def test_risk_guard_endpoints(client):
     assert meta["publishing"] == {"paused": False}
     h = {"X-Requested-With": "SignalDesk"}
     assert (await client.put("/api/admin/publishing", json={"paused": True}, headers=h)).status_code == 401
-    await client.post("/api/admin/login", json={"username": "admin", "password": "correct horse"})
+    await login(client)
     assert (await client.put("/api/admin/publishing", json={"paused": True})).status_code == 403  # no CSRF header
     r = (await client.put("/api/admin/publishing", json={"paused": True}, headers=h)).json()
     assert r["paused"] is True and r["by"] == "admin" and r["changed"] is True
