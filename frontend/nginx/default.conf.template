@@ -26,8 +26,13 @@ map "${SEARCH_INDEXING}" $googlebot_meta {
 }
 map $http_upgrade $connection_upgrade { default upgrade; "" ""; }
 
+# Docker's DNS. The API container gets a new address whenever it is recreated (every update): look it
+# up again every 10 s instead of once at start, which left this proxy answering 502 after an update.
+resolver 127.0.0.11 valid=10s ipv6=off;
+
 upstream api_backend {
-    server ${API_UPSTREAM};
+    zone api_backend 64k;
+    server ${API_UPSTREAM} resolve;
     keepalive 16;
 }
 

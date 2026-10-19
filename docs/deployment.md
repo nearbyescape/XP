@@ -312,3 +312,4 @@ Permissions-Policy.
 | Telegram test never arrives | Admin console → Telegram: bot error text; is the bot an admin of the channel; is `TELEGRAM_CHANNEL_ID` right (`@name` or `-100…`)? |
 | Admin login fails over HTTP | Set `COOKIE_SECURE=false` for plain-HTTP testing only. |
 | Dashboard not updating live | A proxy in front of nginx is buffering `/api/stream`. Disable buffering for that path. |
+| 502 Bad Gateway for about 10 s after an update | Normal: the website proxy looks the recreated API container up again every 10 s. If it lasts longer, `docker compose ps` and `docker compose logs --tail 50 api web`; installs before October 2026 need `docker compose restart web` after each update. |
