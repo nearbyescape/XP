@@ -243,6 +243,7 @@ def open_risk(exp: Exposure, style: Style) -> str:
 
 
 PAUSED = "⏸️ New signals are paused. Open signals are still tracked and updated."
+QUIET = "<i>No setup met our entry rules today — we only trade when the odds are on our side.</i>"
 
 
 def session_start(now: datetime, style: Style, snapshot: dict, open_rows: list[Signal],
@@ -283,6 +284,8 @@ def session_end(now: datetime, style: Style, published: list[Signal], events: li
         f"Hits: TP1 ×{counts['TP1']} · TP2 ×{counts['TP2']} · TP3 ×{counts['TP3']} · SL ×{counts['SL']}"
         + (f" · stop at entry ×{counts['BE']}" if counts["BE"] else ""),
     ]
+    if not published and not paused:  # a quiet day reads as discipline, not as a dead channel
+        lines += ["", QUIET]
     if closed:
         wins = sum(1 for r in closed if (r.pnl_net or 0) > 0)
         avg = sum(r.pnl_net or 0 for r in closed) / len(closed)

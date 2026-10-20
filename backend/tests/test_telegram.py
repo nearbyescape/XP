@@ -311,6 +311,10 @@ async def test_session_greeting_and_summary(service, monkeypatch):
     assert "<b>Closed (2)</b> · 1 won · 1 lost" in bye and "SOLUSDT LONG · TP3 · +2.21%" in bye
     assert "<b>Open overnight (1)</b>\nBTCUSDT LONG · TP1 ✓" in bye
     assert "Next session: 19 Oct 2026, 09:00 AM IST" in bye
+    assert fmt.QUIET not in bye  # signals today
+    async with db.sessions()() as s:
+        quiet = await svc.session_end_text(s, evening + timedelta(days=1))
+    assert "Signals: 0\nHits: TP1 ×0" in quiet and f"\n\n{fmt.QUIET}\n" in quiet
 
     svc.clock = FixedClock(morning + timedelta(minutes=2))
     await svc._session_message("start", morning)
