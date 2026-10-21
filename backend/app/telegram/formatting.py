@@ -246,6 +246,20 @@ PAUSED = "⏸️ New signals are paused. Open signals are still tracked and upda
 QUIET = "<i>No setup met our entry rules today — we only trade when the odds are on our side.</i>"
 
 
+def setup_forming(side: int, at: datetime, later: list[datetime], style: Style) -> str:
+    """The AI model is close to a signal at an early check (app/engine/forming.py)."""
+    s = style.session
+    return "\n".join([
+        "👀 <b>Setup forming</b>",
+        "",
+        f"Our AI model is close to a signal after the {s.label(at, with_date=False)} check, leaning "
+        f"<b>{'LONG' if side == 1 else 'SHORT'}</b>.",
+        "Not a signal yet — please don't enter early. If it confirms, it is posted here with entry, stop and "
+        "targets.",
+        "",
+        "Next checks today: " + " · ".join(s.label(t, with_date=False) for t in later),
+    ])
+
 def session_start(now: datetime, style: Style, snapshot: dict, open_rows: list[Signal],
                   overnight: list[tuple[str, datetime, Signal]], k30: dict, exp: Exposure | None = None,
                   paused: bool = False) -> str:

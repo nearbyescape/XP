@@ -126,7 +126,8 @@ What gets sent to the channel (nothing else):
 | New signal: symbol and side, setup, entry, stop loss, TP1 / TP2 / TP3 with the share closed at each, "after TP1 move the stop to entry", entry window (15 min), "Open signal" button. When 10 or more published signals are before TP1 (this one included), one extra line: "⚠️ High open risk … keep your total under 5%" | at a 4H close in the session | yes |
 | TP1 / TP2 hit: reply to the signal with the price and the share closed | as it happens | yes in the session, silent at night |
 | Signal closed (TP3, SL, stop at entry, time limit): reply with the result | as it happens | yes in the session, silent at night |
-| Session end: signals of the day, TP1/TP2/TP3/SL hits, closed signals with results, positions open overnight with the open-risk line, 30-day stats | 11:00 PM IST | yes |
+| Setup forming: "Our AI model is close to a signal after the 01:30 PM check, leaning SHORT · not a signal yet, please don't enter early" and the checks left today. Only when strategy C's best score is within `WATCH_SCORE_MARGIN` (0.005) of its threshold at one of the day's first two checks, nothing has been published that day and C is live; at most once a day. In 2022-26 testing: 0.9 a week, a signal followed later that day 69% of the time (37% on comparable days) and went the way it leaned 81% of the time. Turn off with `TELEGRAM_WATCH_MESSAGES=false` | 09:30 or 01:30 PM IST | silent |
+| Session end: signals of the day, TP1/TP2/TP3/SL hits, closed signals with results, positions open overnight with the open-risk line, 30-day stats; on a day without signals: "No setup met our entry rules today — we only trade when the odds are on our side." | 11:00 PM IST | yes |
 | Member rules (pinned) | when you press *Post & pin rules* in the admin console | yes |
 
 The original signal post is also edited with its progress and final result; edits never notify.

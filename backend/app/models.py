@@ -138,8 +138,8 @@ class TelegramOutbox(Base):
 
     id: Mapped[int] = mapped_column(BigId, primary_key=True, autoincrement=True)
     chat_id: Mapped[str] = mapped_column(String(64))
-    # signal_new | signal_update | signal_close | signal_edit | session_start | session_end | rules | alert |
-    # reply | test
+    # signal_new | signal_update | signal_close | signal_edit | session_start | session_end | rules | watch |
+    # alert | reply | test
     kind: Mapped[str] = mapped_column(String(16))
     signal_id: Mapped[int | None] = mapped_column(ForeignKey("signals.id", ondelete="SET NULL"),
                                                   nullable=True, index=True)

@@ -117,6 +117,13 @@ class TelegramService:
         if chat:
             s.add(TelegramOutbox(chat_id=chat, kind=kind, text=text, next_attempt_at=utcnow()))
 
+    async def enqueue_watch(self, s, text: str) -> None:
+        """'Setup forming' note (app/engine/forming.py): to every signal chat, without sound."""
+        if not self.enabled:
+            return
+        for chat in await self._targets(s):
+            s.add(TelegramOutbox(chat_id=chat, kind="watch", text=text, silent=True, next_attempt_at=utcnow()))
+
     async def enqueue_admin(self, s, text: str, key: str | None = None) -> bool:
         """Ops alert to TELEGRAM_ADMIN_CHAT_IDS. Alerts sharing a key are throttled."""
         if not self.enabled or not self.settings.admin_chats:

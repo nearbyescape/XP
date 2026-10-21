@@ -109,8 +109,9 @@ def select_candidates(t: pd.Timestamp, rows: dict[str, tuple[CoinSeries, int]],
 
 def evaluate_candle(frames: dict[str, pd.DataFrame], t: pd.Timestamp, symbols: list[str],
                     open_positions: set[tuple[str, str]], enabled: set[str],
-                    model: MLModel | None) -> list[Candidate]:
-    """Live path: `frames` hold closed candles only; coins whose last candle is `t` are evaluated."""
+                    model: MLModel | None) -> tuple[list[Candidate], list[tuple[str, int, float]]]:
+    """Live path: `frames` hold closed candles only; coins whose last candle is `t` are evaluated.
+    Returns the candidates and the model's scores (symbol, side, probability)."""
     btc = frames.get("BTCUSDT")
     if btc is None or btc.empty:
         raise ValueError("BTCUSDT candles are required (market regime)")
@@ -123,7 +124,7 @@ def evaluate_candle(frames: dict[str, pd.DataFrame], t: pd.Timestamp, symbols: l
     scores = []
     if MLR.code in enabled and model is not None:
         scores = [(s.symbol, s.side, s.prob) for s in model.score(frames, t)]
-    return select_candidates(t, rows, scores, symbols, open_positions, enabled, model)
+    return select_candidates(t, rows, scores, symbols, open_positions, enabled, model), scores
 
 
 def regime_snapshot(frames: dict[str, pd.DataFrame]) -> dict[str, dict]:

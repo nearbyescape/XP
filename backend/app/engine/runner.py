@@ -21,7 +21,7 @@ from sqlalchemy import select
 
 from .. import __version__, db
 from ..config import Settings
-from ..core.catalog import BAR_SECONDS, INTERVAL, STRATEGIES
+from ..core.catalog import BAR_SECONDS, INTERVAL, MLR, STRATEGIES
 from ..core.evaluate import Candidate, evaluate_candle, regime_snapshot
 from ..core.lifecycle import Bar, Costs, pnl, step
 from ..core.ml import MLModel
@@ -34,6 +34,7 @@ from ..services import repo
 from ..telegram import formatting as fmt
 from ..telegram.service import TelegramService
 from .clock import Clock
+from .forming import review_forming
 from .killswitch import review_strategy
 from .watch import review_risk
 
@@ -183,8 +184,8 @@ class Engine:
             open_positions = await repo.positions_open_at(s, close_t)
         enabled = {c for c, st in states.items() if st.mode != "off"}
         frames = {k: v[v.ts <= t] for k, v in self.frames.items() if not v.empty}
-        cands = await asyncio.to_thread(evaluate_candle, frames, t, self.symbols, open_positions,
-                                        enabled, self.model)
+        cands, scores = await asyncio.to_thread(evaluate_candle, frames, t, self.symbols, open_positions,
+                                                enabled, self.model)
         created = []
         for c in cands:
             sig = await self.open_signal(c, states[c.strategy])
@@ -195,6 +196,8 @@ class Engine:
             await s.commit()
         await self.set_last_eval(t, signals=len(created), seconds=round(time.monotonic() - started, 2))
         await self.safe(self.review_risk(), "risk")
+        if self.model:
+            await self.safe(self.review_forming(close_t, scores, states.get(MLR.code)), "forming")
         await self.event("info", "candle.evaluated",
                          f"{t:%Y-%m-%d %H:%M} evaluated: {len(created)} new signal(s)",
                          {"signals": [s.uid for s in created]})
@@ -323,6 +326,15 @@ class Engine:
                 await s.commit()
             else:
                 await s.commit()
+
+    async def review_forming(self, close_t: datetime, scores, c_state) -> None:
+        async with db.sessions()() as s:
+            sent = await review_forming(s, self.settings, self.session, self.telegram, close_t, scores,
+                                        self.model.threshold, c_state)
+            await s.commit()
+        if sent:
+            await self.event("info", "setup.forming",
+                             f"setup-forming note queued after the {self.session.label(close_t)} check")
 
     async def review_risk(self) -> None:
         async with db.sessions()() as s:

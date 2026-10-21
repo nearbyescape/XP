@@ -73,6 +73,9 @@ class Settings(BaseSettings):
     telegram_channel_url: str | None = None     # public invite link shown on the website
     telegram_dm_enabled: bool = False           # also deliver signals to users who /start the bot
     telegram_session_messages: bool = True      # greeting at session start, summary at session end
+    # "Setup forming" note when the AI model is within watch_score_margin of a signal at an early check
+    telegram_watch_messages: bool = True
+    watch_score_margin: float = 0.005
     telegram_api_base: str = "https://api.telegram.org"
     # private chat ids (comma-separated) that receive ops alerts and may use /status; send /id to the bot
     telegram_admin_chat_ids: str = ""
