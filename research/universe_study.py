@@ -5,8 +5,9 @@
     (same with --intervals 1h --start 2022-01)
     python research/meta_label.py --tf 4h --tp 0.5 --sl 3.0 --bars 24 --oos 2022-01-01 --universe 20
     python research/universe_study.py            # its output is kept in results/universe20.md
+    (--universe 15: the top 5 of the same ranking -> results/universe15.md)
 
-The 10 new coins were fixed by rule before any result (see NEW10 in meta_label.py), and so were the pass
+The new coins were fixed by rule before any result (see NEW10 in meta_label.py), and so were the pass
 criteria at the end of this file.
 
 Same construction as the earlier studies: A/B out-of-sample trades on the original 10 coins, C from the
@@ -15,6 +16,7 @@ the same coin and candle resolved A > B > C, every signal replayed on 1h candles
 (TP 0.5/1.0/1.5 ATR closing 50/30/20 %, stop to entry after TP1, time stop), live costs. Published =
 4H candle closing inside 09:00-23:00 IST.
 """
+import argparse
 import sys
 from datetime import timedelta
 from pathlib import Path
@@ -26,7 +28,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent / "backend"))
 import tp_ladder as L  # noqa: E402
-from meta_label import NEW10, SYMBOLS as OLD10  # noqa: E402
+from meta_label import SYMBOLS as OLD10, UNIVERSES  # noqa: E402
 from app.core.lifecycle import Bar, Costs, TradeState, pnl, step, target_prices  # noqa: E402
 
 RES = L.HERE / "results"
@@ -115,13 +117,35 @@ def concentration(d: pd.DataFrame):
             "same_p99": float(np.percentile(same, 99)), "same_ge12_days": int(len({pd.Timestamp(g).date() for g, x in zip(grid, same) if x >= 12}))}
 
 
+def dry_spells(p: pd.DataFrame, start, end) -> str:
+    """Days without a published signal (IST calendar days) and runs of 3+ such days."""
+    idx = pd.date_range((start + IST).normalize().tz_convert(None), (end + IST).normalize().tz_convert(None), freq="D")
+    per_day = (p.entry + IST).dt.tz_convert(None).dt.normalize().value_counts()
+    quiet = pd.Series(0, index=idx).add(per_day, fill_value=0).loc[idx].eq(0).to_numpy()
+    runs, n = [], 0
+    for q in [*quiet, False]:
+        if q:
+            n += 1
+        elif n:
+            runs.append(n)
+            n = 0
+    long = [r for r in runs if r >= 3]
+    return (f"days without a signal {quiet.mean() * 100:.0f}% · quiet spells of 3+ days: {len(long)} "
+            f"(one every {len(idx) / max(1, len(long)):.0f} days) · longest {max(runs, default=0)} days")
+
+
 if __name__ == "__main__":
-    paths = L.load_paths("1h", OLD10 + NEW10)
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--universe", default="20", choices=["15", "20"])
+    u = ap.parse_args().universe
+    NEW = UNIVERSES[u][len(OLD10):]
+    NEWB, NEWG = f"new (C on {u})", f"C on the new {len(NEW)}"
+    paths = L.load_paths("1h", OLD10 + NEW)
     books = {
         "today (C on 10)": replay(signals("C_meta_4h_tp0.5_sl3.0_b24_thr_cal950_trades.csv",
                                           "meta_preds_4h_tp0.5_sl3.0_b24.parquet"), paths),
-        "new (C on 20)": replay(signals("C_meta_4h_tp0.5_sl3.0_b24_u20_thr_cal950_trades.csv",
-                                        "meta_preds_4h_tp0.5_sl3.0_b24_u20.parquet"), paths),
+        NEWB: replay(signals(f"C_meta_4h_tp0.5_sl3.0_b24_u{u}_thr_cal950_trades.csv",
+                             f"meta_preds_4h_tp0.5_sl3.0_b24_u{u}.parquet"), paths),
     }
     end = min(b.entry.max() for b in books.values())
     start = pd.Timestamp("2022-01-01", tz="UTC")
@@ -135,7 +159,7 @@ if __name__ == "__main__":
             groups = {"all strategies": p, "A+B": p[p.strategy != "MLR-4H"],
                       "C on the original 10": p[(p.strategy == "MLR-4H") & p.symbol.isin(OLD10)]}
             if bname.startswith("new"):
-                groups["C on the new 10"] = p[(p.strategy == "MLR-4H") & p.symbol.isin(NEW10)]
+                groups[NEWG] = p[(p.strategy == "MLR-4H") & p.symbol.isin(NEW)]
             print(f" {bname}")
             for g, d in groups.items():
                 out[(pname, bname, g)] = k(d, days)
@@ -143,9 +167,9 @@ if __name__ == "__main__":
 
     ALL = "2022-01 → now"
     print("\n=== new coins, C only, published, 2022-01 → now (information only: coins are not picked by result) ===")
-    t = books["new (C on 20)"]
+    t = books[NEWB]
     p = t[(t.entry >= start) & t.session & (t.strategy == "MLR-4H")]
-    for s in NEW10:
+    for s in NEW:
         print(line(s, k(p[p.symbol == s], (end - start).days)))
 
     print("\n=== open signals before TP1 (published), 2022-01 → now ===")
@@ -155,11 +179,15 @@ if __name__ == "__main__":
               f"{c['open_ge10'] * 100:.1f}% of 4H checks) · same direction max {c['same_max']} "
               f"(99th pct {c['same_p99']:.0f}; 12 or more on {c['same_ge12_days']} days)")
 
-    n1, n2 = out[(ALL, "new (C on 20)", "C on the new 10")], out[("2025 → now", "new (C on 20)", "C on the new 10")]
-    o_old, o_new = out[(ALL, "today (C on 10)", "C on the original 10")], out[(ALL, "new (C on 20)", "C on the original 10")]
-    b_old, b_new = out[(ALL, "today (C on 10)", "all strategies")], out[(ALL, "new (C on 20)", "all strategies")]
+    print("\n=== quiet days (published), 2022-01 → now ===")
+    for bname, t in books.items():
+        print(f"  {bname:<18} {dry_spells(t[(t.entry >= start) & t.session], start, end)}")
+
+    n1, n2 = out[(ALL, NEWB, NEWG)], out[("2025 → now", NEWB, NEWG)]
+    o_old, o_new = out[(ALL, "today (C on 10)", "C on the original 10")], out[(ALL, NEWB, "C on the original 10")]
+    b_old, b_new = out[(ALL, "today (C on 10)", "all strategies")], out[(ALL, NEWB, "all strategies")]
     checks = [
-        (f"1. new 10 coins: win {n1['wr'] * 100:.1f}% >= 85%, PF {n1['pf']:.2f} >= 1.3, 2025+ PF {n2['pf']:.2f} >= 1.2",
+        (f"1. new {len(NEW)} coins: win {n1['wr'] * 100:.1f}% >= 85%, PF {n1['pf']:.2f} >= 1.3, 2025+ PF {n2['pf']:.2f} >= 1.2",
          n1["wr"] >= 0.85 and n1["pf"] >= 1.3 and n2["pf"] >= 1.2),
         (f"2. original 10 coins: C PF {o_new['pf']:.2f} vs today {o_old['pf']:.2f} (allowed down to {o_old['pf'] - 0.1:.2f})",
          o_new["pf"] >= o_old["pf"] - 0.1),
@@ -169,4 +197,4 @@ if __name__ == "__main__":
     print("\n=== pass criteria (fixed before the test) ===")
     for text, ok in checks:
         print(f"  {'PASS' if ok else 'FAIL'}  {text}")
-    print(f"\nVERDICT: {'PASS: go to 20 coins' if all(ok for _, ok in checks) else 'FAIL: stay on 10 coins'}")
+    print(f"\nVERDICT: {f'PASS: go to {u} coins' if all(ok for _, ok in checks) else 'FAIL: stay on 10 coins'}")

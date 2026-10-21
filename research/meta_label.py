@@ -31,7 +31,7 @@ SYMBOLS = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT",
 # median daily futures volume Oct 2025 - Sep 2026. Appended, so the original coins keep their symbol_id.
 NEW10 = ["ZECUSDT", "NEARUSDT", "BCHUSDT", "FILUSDT", "AAVEUSDT",
          "UNIUSDT", "LTCUSDT", "XLMUSDT", "TRXUSDT", "DASHUSDT"]
-UNIVERSES = {"10": SYMBOLS, "20": SYMBOLS + NEW10}
+UNIVERSES = {"10": SYMBOLS, "15": SYMBOLS + NEW10[:5], "20": SYMBOLS + NEW10}  # 15: the top 5 of the same ranking
 COST = dict(entry=0.0007, tp=0.0002, exit=0.0008)  # "pro" cost model (see run_research.py)
 CAL_QUANTILES = (0.90, 0.95, 0.975)
 
@@ -161,7 +161,7 @@ def main():
     ap.add_argument("--oos", default="2025-01-01")
     ap.add_argument("--from-preds", action="store_true", help="reuse saved OOS predictions")
     ap.add_argument("--universe", default="10", choices=sorted(UNIVERSES),
-                    help="10: the original coins; 20: + NEW10 (files tagged _u20)")
+                    help="10: the original coins; 15 / 20: + the top 5 / all of NEW10 (files tagged _u15 / _u20)")
     ap.add_argument("--export", action="store_true",
                     help="train the production model on ALL data and save it to results/models/")
     args = ap.parse_args()

@@ -69,6 +69,10 @@ No variant was tried after seeing the result.
   today (C on 10)    most at once 21 (99th pct 10; 10 or more 1.2% of 4H checks) · same direction max 21 (99th pct 9; 12 or more on 12 days)
   new (C on 20)      most at once 21 (99th pct 13; 10 or more 3.2% of 4H checks) · same direction max 21 (99th pct 12; 12 or more on 49 days)
 
+=== quiet days (published), 2022-01 → now ===
+  today (C on 10)    days without a signal 44% · quiet spells of 3+ days: 87 (one every 20 days) · longest 15 days
+  new (C on 20)      days without a signal 43% · quiet spells of 3+ days: 88 (one every 20 days) · longest 9 days
+
 === pass criteria (fixed before the test) ===
   FAIL  1. new 10 coins: win 86.9% >= 85%, PF 1.23 >= 1.3, 2025+ PF 1.05 >= 1.2
   FAIL  2. original 10 coins: C PF 1.39 vs today 1.72 (allowed down to 1.62)

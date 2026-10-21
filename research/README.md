@@ -28,7 +28,7 @@ perpetual from the official Binance data portal (needed for the universe-expansi
 | `pairs.py` | Market-neutral pair-spread reversion (45 pairs) |
 | `cme_gap.py` | CME weekend-gap fill study |
 | `summarize.py` | Funnel table across all grids → `results/summary_funnel.md` |
-| `universe_study.py` | Universe expansion (Oct 2026): C retrained on 20 coins (`meta_label.py --universe 20`) vs today's 10, live lifecycle and session, pass criteria fixed up front → `results/universe20.md` (failed: stay on 10) |
+| `universe_study.py` | Universe expansion (Oct 2026): C retrained on 20 coins (`meta_label.py --universe 20`) vs today's 10, live lifecycle and session, pass criteria fixed up front → `results/universe20.md`; `--universe 15` (top 5 of the same ranking) → `results/universe15.md` (both failed: stay on 10) |
 | `tp_ladder.py` | TP1 / TP2 / TP3 study: target distances per coin, hit rates by target level, scale-out plans with and without a break-even stop → `results/tp_ladder_<tf>.md` |
 | `latest_signals.py` | Reference implementation of RGP-4H / RSR-4H / MLR-4H on the latest (or any) closed candle. **Parity test for the live engine** |
 | `results/candidates/*_trades.csv` | Every simulated trade of the validated strategies (A/B: 2018 → Oct 2026; C: 2022 → Oct 2026, by threshold) |
