@@ -80,19 +80,19 @@ MLR = StrategySpec(
     basis="LightGBM model · 48 features · ATR14 · completed 4H candle",
     summary=("A LightGBM model scores every coin, both directions, at every 4h close for the "
              "probability that a 0.5 ATR target is hit before a 3 ATR stop. Only its most "
-             "confident calls (top 5% of its training-period scores) are published."),
+             "confident calls (top 6% of its training-period scores) are published."),
     rules=("score = P(TP1 before SL within 24 candles | 48 features)\n"
            "signal if score >= model threshold (≈0.88–0.91), best 5 per candle\n"
            "TP1 / TP2 / TP3 at 0.5 / 1.0 / 1.5 x ATR(14), closing 50 / 30 / 20%\n"
            "SL 3.0 x ATR(14), moved to entry after TP1 · time stop 24 candles (4 days)\n"
            "retrained quarterly on an expanding window"),
-    benchmark={"period": "2022-01 → 2026-10 (walk-forward)", "signals": 3236, "win_rate": 0.889,
-               "breakeven_win_rate": 0.834, "profit_factor": 1.59, "net_pct": 0.45,
-               "avg_win_pct": 1.36, "avg_loss_pct": 6.83, "tp1_rate": 0.888, "tp2_rate": 0.463, "tp3_rate": 0.311},
+    benchmark={"period": "2022-01 → 2026-10 (walk-forward)", "signals": 3848, "win_rate": 0.883,
+               "breakeven_win_rate": 0.834, "profit_factor": 1.50, "net_pct": 0.39,
+               "avg_win_pct": 1.35, "avg_loss_pct": 6.76, "tp1_rate": 0.882, "tp2_rate": 0.458, "tp3_rate": 0.306},
 )
 
 STRATEGIES: dict[str, StrategySpec] = {s.code: s for s in (RGP, RSR, MLR)}
-BOOK_BENCHMARK = {"period": "2022-01 → 2026-10", "signals": 5788, "win_rate": 0.893,
-                  "breakeven_win_rate": 0.851, "profit_factor": 1.46, "net_pct": 0.35,
-                  "avg_win_pct": 1.24, "avg_loss_pct": 7.12, "cagr_at_half_pct_risk": 0.173,
-                  "max_dd_at_half_pct_risk": 0.142, "tp1_rate": 0.892, "tp2_rate": 0.451, "tp3_rate": 0.304}
+BOOK_BENCHMARK = {"period": "2022-01 → 2026-10", "signals": 6385, "win_rate": 0.888,
+                  "breakeven_win_rate": 0.849, "profit_factor": 1.41, "net_pct": 0.32,
+                  "avg_win_pct": 1.25, "avg_loss_pct": 7.03, "cagr_at_half_pct_risk": 0.167,
+                  "max_dd_at_half_pct_risk": 0.175, "tp1_rate": 0.888, "tp2_rate": 0.450, "tp3_rate": 0.302}

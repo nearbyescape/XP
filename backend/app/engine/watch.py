@@ -25,8 +25,8 @@ from ..telegram import formatting as fmt
 
 log = logging.getLogger(__name__)
 STATE_KEY = "risk_watch"
-TESTED_DRAWDOWN = 8.5   # % — worst fall from a peak of the published book in 2022-2026 testing
-TESTED_WIN_RATE = 57    # % — worst 30-signal win rate of any strategy in testing
+TESTED_DRAWDOWN = 10.2  # % — worst fall from a peak of the published book in 2022-2026 testing
+TESTED_WIN_RATE = 53    # % — worst 30-signal win rate of any strategy in testing
 
 
 def _rows(signals):

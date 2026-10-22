@@ -4,8 +4,8 @@ At one of the session day's first checks (two or more still follow that day), wh
 published yet that day, strategy C is live, publishing is not paused and C's best score is within
 WATCH_SCORE_MARGIN of its threshold: one silent note to the channel, at most once a day. Over 2022 -
 Sep 2026 (walk-forward scores, margin 0.005, the 09:30 and 13:30 IST checks) it would have gone out on
-222 days, 0.9 a week; a signal followed later that day 69% of the time (37% on comparable days without
-it) and the first one went the way the note leaned 81% of the time.
+249 days, 1.0 a week; a signal followed later that day 69% of the time (39% on comparable days without
+it) and the first one went the way the note leaned 77% of the time.
 """
 
 from __future__ import annotations

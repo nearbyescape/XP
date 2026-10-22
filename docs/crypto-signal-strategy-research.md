@@ -144,6 +144,7 @@ Only calls above a confidence threshold are published.
 ```
 every quarter: retrain on ALL history up to the quarter start (expanding window, 100h purge gap)
 threshold      = 95th percentile of the model's scores on its own last 12 training months   (≈ 0.89)
+                 live since 22 Oct 2026: lowered a quarter of the way toward the 90th       (0.882, §7)
 signal         = P(win) ≥ threshold, at most 5 per 4h candle (highest P first)
 TP = 0.5 × ATR(14) · SL = 3.0 × ATR(14) · time stop = 24 candles · one open signal per coin
 ```
@@ -275,6 +276,7 @@ The full funnel per family and timeframe is in [`research/results/summary_funnel
 | Run A + B + C together | 3.3/day on 10 coins (A alone: 1.0/day) | ✓ validated |
 | Expand universe from 10 → ~40 liquid USDT-M perps (≥ $50M daily volume) | ~0.33 signals/coin/day → **~8–12/day**. Correlated alts cluster and C is capped at 5 per candle, so growth is less than linear | Re-run the harness on the bigger universe: `research/data/fetch_klines.py --source binance` |
 | Looser C threshold (top 10% instead of top 5%) | C: 3.6/day instead of 2.0 at 87.0% win rate, PF 1.31 | ✓ validated (lower quality) |
+| C threshold a quarter of the way from the 95th to the 90th percentile (live lifecycle and session, 10 coins, 2022-01 → 2026-10) | Published 2.12 → 2.33/day, win 89.2% → 88.9%, PF 1.48 → 1.42, growth at 0.5% risk +67% → +66%, max fall 8.5% → 10.2%, days without a signal 44% → 41%. Halfway: PF 1.39, max fall 13.3% | ✓ **live since 22 Oct 2026** (`THRESHOLD_STEP` in meta_label.py) |
 | Use RSI(3) < 15 instead of RSI(2) < 5 for A | +27% A signals (2,286 vs 1,800) at 90.1% win rate, PF 1.25 | ✓ validated |
 | 1h / 15m versions | More signals, but they lose money | ✗ do not ship |
 

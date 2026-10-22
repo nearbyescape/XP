@@ -135,8 +135,8 @@ export default function Strategies() {
           <h2 className="text-sm font-semibold">Risk you should expect</h2>
           <ul className="mt-2 space-y-1.5 text-sm text-muted">
             <li>• Average win ≈ +1.2%, average loss ≈ −7%: about one stop for every eight signals that reach TP1.</li>
-            <li>• Losing streaks of 8–11 signals and rough quarters (win rate near 57%) occurred in the backtest.</li>
-            <li>• At 0.5% risk per signal the backtest drawdown peaked at {b.max_dd_at_half_pct_risk ? `${num(b.max_dd_at_half_pct_risk * 100, 1)}%` : "≈14%"}. At 1% it would have roughly doubled.</li>
+            <li>• Losing streaks of 8–12 signals and rough stretches (win rate near 53%) occurred in the backtest.</li>
+            <li>• At 0.5% risk per signal the backtest drawdown peaked at {b.max_dd_at_half_pct_risk ? `${num(b.max_dd_at_half_pct_risk * 100, 1)}%` : "≈18%"}. At 1% it would have roughly doubled.</li>
             <li>• Losses only come from signals stopped before TP1. After TP1 the stop sits at entry, so the rest of the trade can no longer lose.</li>
             <li>• Spot-exchange fees (0.1% per side) remove most of the edge. Use low-fee perpetual futures at 1×.</li>
             <li>• A strategy pauses automatically if its last 150 signals fall below an 82% win rate or a 0.75 profit factor.</li>

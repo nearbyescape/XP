@@ -33,6 +33,10 @@ NEW10 = ["ZECUSDT", "NEARUSDT", "BCHUSDT", "FILUSDT", "AAVEUSDT",
          "UNIUSDT", "LTCUSDT", "XLMUSDT", "TRXUSDT", "DASHUSDT"]
 UNIVERSES = {"10": SYMBOLS, "15": SYMBOLS + NEW10[:5], "20": SYMBOLS + NEW10}  # 15: the top 5 of the same ranking
 COST = dict(entry=0.0007, tp=0.0002, exit=0.0008)  # "pro" cost model (see run_research.py)
+# Production threshold: the 95th percentile of the last year's in-sample scores, lowered this share of the
+# way toward the 90th (Oct 2026: ~10% more signals for about the same profit; docs/crypto-signal-strategy-
+# research.md §7). The walk-forward columns thr_cal950 / thr_cal900 bound it.
+THRESHOLD_STEP = 0.25
 CAL_QUANTILES = (0.90, 0.95, 0.975)
 
 
@@ -240,6 +244,7 @@ def export_model(data, feats, args, tag, end):
     model.fit(tr[feats], tr["y"])
     cal = tr[tr.ts >= tr.ts.max() - pd.Timedelta(days=365)]
     prob = model.predict_proba(cal[feats])[:, 1]
+    p95, p90 = float(np.quantile(prob, 0.95)), float(np.quantile(prob, 0.90))
     out = os.path.join(RESULTS, "models")
     os.makedirs(out, exist_ok=True)
     model.booster_.save_model(os.path.join(out, f"mlr_{tag}.txt"))
@@ -248,7 +253,8 @@ def export_model(data, feats, args, tag, end):
         "symbols": SYMBOLS,  # symbol_id feature = index in this list; cross-sectional features use it
         "version": f"mlr-{args.tf}-{tr.ts.max():%Y-%m-%d}",
         "tp_atr": args.tp, "sl_atr": args.sl, "max_bars": args.bars,
-        "threshold": float(np.quantile(prob, 0.95)), "threshold_rule": "95th pct of last-365d in-sample probs",
+        "threshold": p95 - THRESHOLD_STEP * (p95 - p90), "threshold_p95": p95, "threshold_p90": p90,
+        "threshold_rule": f"95th pct of last-365d in-sample probs, lowered {THRESHOLD_STEP:g} of the way toward the 90th",
         "max_signals_per_candle": 5, "trained_through": str(tr.ts.max()), "train_rows": int(len(tr)),
         "retrain": "quarterly, expanding window, same recipe (meta_label.py --export)",
     }
