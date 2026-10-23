@@ -28,7 +28,9 @@ function Timeline({ s }: { s: Signal }) {
   const multi = s.targets.length > 1;
   const items: { t: string; label: string; note: string; pending?: boolean }[] = [
     { t: s.signal_open_at, label: "Signal candle opened", note: `${s.strategy} conditions evaluated at its close` },
-    { t: s.entry_at, label: "Signal published · entry", note: `market entry at ${price(s.entry_price)}` },
+    s.carried_from
+      ? { t: s.entry_at, label: "Overnight setup posted at the morning check · entry", note: `still valid: market entry at ${price(s.entry_price)}, targets and stop from the night setup` }
+      : { t: s.entry_at, label: "Signal published · entry", note: `market entry at ${price(s.entry_price)}` },
   ];
   for (const t of s.targets) {
     if (!t.hit_at || (s.exit_reason === "TP" && t.n === s.targets.length && t.hit_at === s.exit_at)) continue;
@@ -156,6 +158,7 @@ export default function SignalDetail() {
             <div className="mt-2 divide-y divide-line/60">
               <Row k="Signal ID" v={`#${s.id}`} />
               <Row k="Strategy" v={`${s.strategy_name} (${s.strategy})`} />
+              {s.carried_from !== null && <Row k="Posted" v="overnight setup, carried to the morning check" />}
               <Row k="Regime at signal" v={<span className="inline-flex items-center gap-2">BTC <Trend value={s.regime_btc} /> coin <Trend value={s.regime_coin} /></span>} />
               {s.model_prob !== null && <Row k="Model confidence" v={`${num(s.model_prob * 100, 1)}%`} />}
               <Row k="ATR(14) at signal" v={price(s.atr)} />

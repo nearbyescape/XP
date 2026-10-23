@@ -111,6 +111,7 @@ export interface Signal {
   targets_hit: number;
   tp1_at: string | null;
   risk_at_entry: number | null; // published signals before TP1 when this one was published, itself included
+  carried_from: number | null; // morning carry-over of this night signal (entry at the morning price)
   take_profit_2: number | null;
   take_profit_3: number | null;
   atr: number;

@@ -58,6 +58,16 @@ async def test_engine_matches_replay(tmp_path, frames):
 
     async with db.sessions()() as s:
         rows = (await s.scalars(select(Signal))).all()
+    # morning carry-overs re-post a night signal at the session's first check (app/engine/carry.py)
+    carried = [r for r in rows if r.carried_from]
+    rows = [r for r in rows if not r.carried_from]
+    night = {r.id: r for r in rows}
+    assert carried
+    for c in carried:
+        n = night[c.carried_from]
+        assert c.published and not n.published and (c.strategy, c.symbol, c.side) == (n.strategy, n.symbol, n.side)
+        assert engine.session.local(c.entry_at).strftime("%H:%M") == "09:30" and c.entry_at > n.entry_at
+        assert (c.take_profit, c.stop_loss, c.expires_at) == (n.take_profit, n.stop_loss, n.expires_at)
     # only candles closing inside the publishing session (09:00-23:00 IST) are published
     assert any(r.published for r in rows) and any(not r.published for r in rows)
     assert all(r.published == engine.session.contains(r.entry_at) for r in rows)

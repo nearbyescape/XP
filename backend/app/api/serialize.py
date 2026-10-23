@@ -36,6 +36,7 @@ def signal_out(s: Signal) -> dict:
                      "fill_price": hit_prices[i] if i < len(hit_prices) else None}
                     for i, (p, z) in enumerate(targets)],
         "targets_hit": s.targets_hit or 0, "tp1_at": s.tp1_at, "risk_at_entry": s.risk_at_entry,
+        "carried_from": s.carried_from,
         "take_profit_2": targets[1][0] if len(targets) > 1 else None,
         "take_profit_3": targets[2][0] if len(targets) > 2 else None,
         "atr": s.atr, "tp_atr": s.tp_atr, "sl_atr": s.sl_atr, "max_bars": s.max_bars,

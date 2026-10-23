@@ -8,6 +8,11 @@ import { useLive } from "@/lib/live";
 import { LevelBar, OutcomeBadge, PnL, SideBadge, StrategyChip, TargetPips, useNow } from "./bits";
 import { Badge, Skeleton } from "./ui";
 
+/** A night setup re-posted at the session's first check (entry at the morning price). */
+function Overnight({ s }: { s: Signal }) {
+  return s.carried_from ? <Badge title="Overnight setup, still valid at the morning check">🌅 Overnight</Badge> : null;
+}
+
 function Coin({ symbol, compact }: { symbol: string; compact?: boolean }) {
   const [b, q] = pair(symbol).split("/");
   return (
@@ -48,7 +53,7 @@ export function ActiveSignalsTable({ rows, loading }: { rows: Signal[]; loading?
               <span className="text-long/90">TP{lastTarget.n > 1 ? lastTarget.n : ""} {price(lastTarget.price)}</span>
             </div>
             <div className="mt-2 flex items-center justify-between text-xs text-muted">
-              <span className="flex items-center gap-2"><StrategyChip code={s.strategy} /><TargetPips hit={s.targets_hit} total={s.targets.length} /></span>
+              <span className="flex items-center gap-2"><StrategyChip code={s.strategy} /><Overnight s={s} /><TargetPips hit={s.targets_hit} total={s.targets.length} /></span>
               <span className="num inline-flex items-center gap-1"><Clock3 size={12} />{left > 0 ? duration(left) : "closing"} left</span>
             </div>
           </li>
@@ -81,7 +86,7 @@ export function ActiveSignalsTable({ rows, loading }: { rows: Signal[]; loading?
                 <td className="px-4 py-3 sm:px-5">
                   <div className="flex items-center gap-3"><Coin symbol={s.symbol} /><SideBadge side={s.side} /></div>
                 </td>
-                <td className="px-3 py-3"><div className="flex flex-col items-start gap-1"><StrategyChip code={s.strategy} /><TargetPips hit={s.targets_hit} total={s.targets.length} /></div></td>
+                <td className="px-3 py-3"><div className="flex flex-col items-start gap-1"><StrategyChip code={s.strategy} /><Overnight s={s} /><TargetPips hit={s.targets_hit} total={s.targets.length} /></div></td>
                 <td className="num px-3 py-3 text-right text-muted">{price(s.entry_price)}</td>
                 <td className="num px-3 py-3 text-right">{price(last)}</td>
                 <td className="px-3 py-3">
@@ -121,7 +126,7 @@ export function HistoryTable({ rows, loading }: { rows: Signal[]; loading?: bool
           <div className="w-[72px] shrink-0"><Coin symbol={s.symbol} compact /></div>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5"><SideBadge side={s.side} /><OutcomeBadge reason={s.exit_reason} pnl={s.pnl_net_pct} hits={s.targets_hit} total={s.targets.length} /></div>
-            <div className="num mt-1 truncate text-2xs text-faint">{stamp(s.entry_at)} · {s.strategy}</div>
+            <div className="num mt-1 truncate text-2xs text-faint">{stamp(s.entry_at)} · {s.strategy}{s.carried_from ? " · overnight" : ""}</div>
           </div>
           <div className="text-right">
             <PnL value={s.status === "CLOSED" ? s.pnl_net_pct : s.unrealized_pct} className="text-sm" />
@@ -156,7 +161,7 @@ export function HistoryTable({ rows, loading }: { rows: Signal[]; loading?: bool
                     {s.origin !== siteOrigin && <Badge tone="warn" title="not produced in real time">{s.origin}</Badge>}
                   </div>
                 </td>
-                <td className="px-3 py-3"><StrategyChip code={s.strategy} /></td>
+                <td className="px-3 py-3"><span className="flex items-center gap-2"><StrategyChip code={s.strategy} /><Overnight s={s} /></span></td>
                 <td className="num px-3 py-3 text-muted">{stamp(s.entry_at)}</td>
                 <td className="num px-3 py-3 text-right text-muted">{price(s.entry_price)}</td>
                 <td className="num px-3 py-3 text-right">{s.status === "CLOSED" ? price(s.exit_price) : "—"}</td>

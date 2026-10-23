@@ -25,7 +25,7 @@ from ..telegram import formatting as fmt
 
 log = logging.getLogger(__name__)
 STATE_KEY = "risk_watch"
-TESTED_DRAWDOWN = 10.7  # % — worst fall from a peak of the published book in 2022-2026 testing
+TESTED_DRAWDOWN = 17.2  # % — worst fall from a peak of the published book in 2022-2026 testing
 TESTED_WIN_RATE = 57    # % — worst 30-signal win rate of any strategy in testing
 
 
@@ -57,7 +57,7 @@ async def measures(s, settings: Settings, previous: dict) -> dict[str, dict]:
     n = settings.watch_win_rate_window
     for code in STRATEGIES:
         last = (await s.scalars(select(Signal).where(Signal.strategy == code, Signal.status == "CLOSED",
-                                                     Signal.published.is_(True),
+                                                     Signal.published.is_(True), Signal.carried_from.is_(None),
                                                      Signal.origin.in_(["live", "demo"]))
                                 .order_by(desc(Signal.exit_at)).limit(n))).all()
         key = f"win_rate:{code}"

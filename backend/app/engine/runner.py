@@ -33,6 +33,7 @@ from ..models import Signal, utcnow
 from ..services import repo
 from ..telegram import formatting as fmt
 from ..telegram.service import TelegramService
+from .carry import carry_candidates, carry_over
 from .clock import Clock
 from .forming import review_forming
 from .killswitch import review_strategy
@@ -191,6 +192,8 @@ class Engine:
             sig = await self.open_signal(c, states[c.strategy])
             if sig:
                 created.append(sig)
+        if self.settings.carry_overnight:
+            await self.safe(self.carry_over(close_t, states, {c.symbol for c in cands}), "carry")
         async with db.sessions()() as s:
             await repo.set_state(s, "regime", regime_snapshot({k: frames[k] for k in self.symbols if k in frames}))
             await s.commit()
@@ -202,16 +205,39 @@ class Engine:
                          f"{t:%Y-%m-%d %H:%M} evaluated: {len(created)} new signal(s)",
                          {"signals": [s.uid for s in created]})
 
-    async def open_signal(self, c: Candidate, state) -> Signal | None:
-        entry_at = (c.signal_open + pd.Timedelta(seconds=BAR_SECONDS)).to_pydatetime()
-        cur = self.current_open.get(c.symbol)
+    async def entry_open(self, symbol: str, entry_at: datetime) -> float | None:
+        """Open of the candle starting at `entry_at`: the price members enter at."""
+        cur = self.current_open.get(symbol)
         if not cur or cur[0] != entry_at:
-            kl = await self.market.klines(c.symbol, INTERVAL, start=entry_at, limit=1)
+            kl = await self.market.klines(symbol, INTERVAL, start=entry_at, limit=1)
             if not kl or kl[0].open_time != entry_at:
-                log.error("no entry candle for %s %s", c.strategy, c.symbol)
                 return None
             cur = (kl[0].open_time, kl[0].open)
-        entry = float(cur[1])
+        return float(cur[1])
+
+    async def carry_over(self, close_t: datetime, states, new_coins: set[str]) -> None:
+        """Morning carry-over of night setups that are still valid (app/engine/carry.py)."""
+        async with db.sessions()() as s:
+            night = await carry_candidates(s, self.session, close_t, new_coins)
+        if not night:
+            return
+        prices = {}
+        for n in night:
+            px = await self.entry_open(n.symbol, close_t)
+            if px is not None:
+                prices[n.symbol] = px
+        async with db.sessions()() as s:
+            made = await carry_over(s, self.settings, close_t, night, prices, states, self.telegram)
+            await s.commit()
+        if made:
+            log.info("carried over %d night setup(s): %s", len(made), [m.uid for m in made])
+
+    async def open_signal(self, c: Candidate, state) -> Signal | None:
+        entry_at = (c.signal_open + pd.Timedelta(seconds=BAR_SECONDS)).to_pydatetime()
+        entry = await self.entry_open(c.symbol, entry_at)
+        if entry is None:
+            log.error("no entry candle for %s %s", c.strategy, c.symbol)
+            return None
         st = new_trade(c, entry, entry_at)
         uid = f"{c.strategy}:{c.symbol}:{c.signal_open:%Y-%m-%dT%H:%MZ}"
         async with db.sessions()() as s:

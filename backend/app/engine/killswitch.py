@@ -31,8 +31,9 @@ async def review_strategy(s, code: str, settings: Settings, telegram, now: datet
     if st is None or st.mode != "live":
         return
     if not st.auto_paused:
+        # carry-overs re-post a night signal that already counts here
         last = (await s.scalars(select(Signal).where(Signal.strategy == code, Signal.status == "CLOSED",
-                                                     Signal.origin != "backfill")
+                                                     Signal.origin != "backfill", Signal.carried_from.is_(None))
                                 .order_by(desc(Signal.exit_at)).limit(settings.kill_switch_window))).all()
         if len(last) < settings.kill_switch_window:
             return
@@ -50,7 +51,8 @@ async def review_strategy(s, code: str, settings: Settings, telegram, now: datet
             log.warning("%s auto-paused: %s", code, st.pause_reason)
         return
     since = (await s.scalars(select(Signal).where(Signal.strategy == code, Signal.status == "CLOSED",
-                                                  Signal.origin != "backfill", Signal.entry_at >= st.paused_at)
+                                                  Signal.origin != "backfill", Signal.carried_from.is_(None),
+                                                  Signal.entry_at >= st.paused_at)
                              .order_by(desc(Signal.exit_at)))).all()
     if len(since) < settings.kill_switch_resume_after:
         return

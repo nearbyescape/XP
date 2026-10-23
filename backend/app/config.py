@@ -60,12 +60,12 @@ class Settings(BaseSettings):
     # --- risk guard (warnings and member guidance; never changes which signals publish) -----
     max_open_risk_pct: float = 5.0         # member rule: total risk across signals still before TP1
     risk_note_signals: int = 10            # signal post notes high open risk from this many before TP1
-    watch_drawdown_pct: float = 6.0        # admin alert: published book this far below its peak
-    watch_drawdown_critical_pct: float = 10.7  # the worst in 2022-2026 testing
+    watch_drawdown_pct: float = 8.0        # admin alert: published book this far below its peak
+    watch_drawdown_critical_pct: float = 17.2  # the worst in 2022-2026 testing
     watch_win_rate_window: int = 30
     watch_win_rate: float = 0.70           # admin alert: a strategy's last 30 signals below this
     watch_win_rate_critical: float = 0.55  # below the worst 30-signal stretch in testing (57%)
-    watch_same_direction: int = 12         # admin alert: this many before TP1 in one direction
+    watch_same_direction: int = 14         # admin alert: this many before TP1 in one direction
 
     # --- telegram (BotFather) ---------------------------------------------------------------
     telegram_bot_token: SecretStr | None = None
@@ -88,6 +88,9 @@ class Settings(BaseSettings):
     session_end: str = "23:00"
     entry_window_minutes: int = 15
     overnight_updates: Literal["silent", "loud"] = "silent"
+    # Morning carry-over: at the session's first check, night setups still before TP1 are posted with
+    # their original targets and stop, entered at the morning price (app/engine/carry.py)
+    carry_overnight: bool = True
 
     # --- security ---------------------------------------------------------------------------
     admin_username: str = "admin"

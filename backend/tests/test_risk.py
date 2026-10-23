@@ -93,7 +93,7 @@ async def alerts(s) -> list[str]:
 async def test_risk_watch_alerts_once_and_when_back_to_normal(guarded):
     settings, svc, _ = guarded
     async with db.sessions()() as s:
-        s.add_all([closed(i, -1.0) for i in range(13)])  # 13 stops at 0.5% each: 6.3% below the peak
+        s.add_all([closed(i, -1.0) for i in range(17)])  # 17 stops at 0.5% each: 8.2% below the peak
         await s.flush()
         assert await review_risk(s, settings, svc) == ["drawdown"]
         assert await review_risk(s, settings, svc) == []  # still at the watch level: no repeat
@@ -102,7 +102,7 @@ async def test_risk_watch_alerts_once_and_when_back_to_normal(guarded):
         assert await review_risk(s, settings, svc) == ["drawdown"]  # back to normal
         texts = await alerts(s)
         assert len(texts) == 2
-        assert "risk.drawdown" in texts[0] and "6.3% below their peak" in texts[0] and "10.7%" in texts[0]
+        assert "risk.drawdown" in texts[0] and "8.2% below their peak" in texts[0] and "17.2%" in texts[0]
         assert "risk.normal" in texts[1] and "Fall from peak back to normal" in texts[1]
 
         # a strategy's last 30 signals: 20 won
@@ -111,21 +111,21 @@ async def test_risk_watch_alerts_once_and_when_back_to_normal(guarded):
         assert await review_risk(s, settings, svc) == ["win_rate:MLR-4H"]
         assert "MLR-4H won 20 of its last 30 signals (67%)" in (await alerts(s))[-1]
 
-        # 12 longs still before TP1 (plus 3 past TP1 and 2 shorts, which do not count)
-        s.add_all([ladder(id=None, uid=f"RGP-4H:L:{i}") for i in range(12)]
+        # 14 longs still before TP1 (plus 3 past TP1 and 2 shorts, which do not count)
+        s.add_all([ladder(id=None, uid=f"RGP-4H:L:{i}") for i in range(14)]
                   + [ladder(id=None, uid=f"RGP-4H:T:{i}", targets_hit=1, fills=FILL) for i in range(3)]
                   + [ladder(id=None, uid=f"RGP-4H:S:{i}", side=-1) for i in range(2)])
         await s.flush()
         assert await review_risk(s, settings, svc) == ["concentration"]
-        assert "12 published signals are LONG and still before TP1" in (await alerts(s))[-1]
-        assert "6.0% at 0.5% each" in (await alerts(s))[-1]
+        assert "14 published signals are LONG and still before TP1" in (await alerts(s))[-1]
+        assert "7.0% at 0.5% each" in (await alerts(s))[-1]
         watch = await repo.get_state(s, "risk_watch")
         assert watch["levels"]["concentration"] == "watch" and watch["measures"]["drawdown"]["level"] is None
 
         last_eval = {"candle": (NOW - timedelta(hours=4)).isoformat(), "signals": 2}
         status = fmt.status({"clock": NOW.isoformat()}, last_eval, await repo.strategy_states(s), 17, {}, {}, watch,
                             STYLE.session)
-        assert "<b>Risk watch</b>" in status and "Same direction before TP1: 12 🟠" in status
+        assert "<b>Risk watch</b>" in status and "Same direction before TP1: 14 🟠" in status
         assert "Clock: 18 Oct 2026, 05:30 PM IST" in status
         assert "Last 4H check: 18 Oct 2026, 05:30 PM IST · 2 signal(s)" in status
 

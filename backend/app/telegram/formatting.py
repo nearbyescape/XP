@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from html import escape
 
-from ..core.catalog import STRATEGIES
+from ..core.catalog import BAR_SECONDS, STRATEGIES
 from ..core.position import fills_of, open_return, targets_of
 from ..core.risk import Exposure
 from ..core.session import Session
@@ -118,11 +118,15 @@ def setup(sig: Signal) -> str:
 
 def new_signal(sig: Signal, style: Style) -> str:
     targets = targets_of(sig)
-    lines = [
-        f"<b>{escape(style.brand)} Signal · {side_name(sig)}</b>",
+    found = sig.signal_open_at + timedelta(seconds=BAR_SECONDS)  # the check that found the setup
+    lines = [f"<b>{escape(style.brand)} Signal · {side_name(sig)}</b>"]
+    if getattr(sig, "carried_from", None):
+        lines.append(f"🌅 Overnight setup from the {style.session.label(found, with_date=False)} check, still valid · "
+                     "entry at the morning price, targets and stop unchanged")
+    lines += [
         f"{escape(sig.symbol)} · {escape(style.market)} · 4H",
         f"Setup: {setup(sig)}",
-        f"Source close: {style.session.label(sig.entry_at)}",
+        f"Source close: {style.session.label(found)}",
         f"Entry: {price(sig.entry_price)}",
         f"Stop loss: {price(sig.stop_loss)}",
     ]

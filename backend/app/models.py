@@ -63,6 +63,8 @@ class Signal(Base):
     tp1_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)  # coin is free from here
     # published signals still before TP1 (stop not yet at entry) when this one was published, itself included
     risk_at_entry: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    # morning carry-over (app/engine/carry.py): the id of the night signal this one re-posts
+    carried_from: Mapped[int | None] = mapped_column(BigId, nullable=True)
     atr: Mapped[float] = mapped_column(Double)
     tp_atr: Mapped[float] = mapped_column(Double)
     sl_atr: Mapped[float] = mapped_column(Double)

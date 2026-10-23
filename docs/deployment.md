@@ -118,6 +118,17 @@ default (`SESSION_TZ`, `SESSION_START`, `SESSION_END`): the 4H candles closing a
 not published, so the record stays identical to the validated strategies. Over 2022–26 this
 published about 2.1 signals a day (about 780 a year) with the same 89% win rate.
 
+**Morning carry-over** (`CARRY_OVERNIGHT=true`, since 23 Oct 2026). At the session's first check
+(09:30 IST) every night setup that is still open and has not reached TP1 is posted as well, marked
+"🌅 Overnight setup … still valid": entry at the morning price, the night setup's targets and stop
+unchanged, the same expiry, stop to the new entry after TP1. Not carried: a coin that gets a new
+signal at 09:30, an older second setup on the same coin, a morning price already past TP1 or the
+stop, a strategy that is paused, anything while publishing is paused. The night signal stays tracked
+unpublished; the kill switch and the win-rate watch count it, not the carry-over. In 2022-26 testing
+(with the AI threshold of 23 Oct 2026): 0.65 carry-overs a day at a 78% win rate and PF 1.23; the channel went
+from 2.44 to 3.09 signals a day, growth at 0.5% risk from +71% to +91%, every year positive, and the
+deepest fall from 10.7% to 17.2%; days without a signal from 40% to 33%.
+
 What gets sent to the channel (nothing else):
 
 | Message | When | Sound |
@@ -127,6 +138,7 @@ What gets sent to the channel (nothing else):
 | TP1 / TP2 hit: reply to the signal with the price and the share closed | as it happens | yes in the session, silent at night |
 | Signal closed (TP3, SL, stop at entry, time limit): reply with the result | as it happens | yes in the session, silent at night |
 | Setup forming: "Our AI model is close to a signal after the 01:30 PM check, leaning SHORT · not a signal yet, please don't enter early" and the checks left today. Only when strategy C's best score is within `WATCH_SCORE_MARGIN` (0.005) of its threshold at one of the day's first two checks, nothing has been published that day and C is live; at most once a day. In 2022-26 testing: 1.1 a week, a signal followed later that day 67% of the time (40% on comparable days) and went the way it leaned 77% of the time. Turn off with `TELEGRAM_WATCH_MESSAGES=false` | 09:30 or 01:30 PM IST | silent |
+| Overnight setup (morning carry-over): a new-signal post with "🌅 Overnight setup from the 05:30 AM check, still valid · entry at the morning price, targets and stop unchanged" | 09:30 IST | yes |
 | Session end: signals of the day, TP1/TP2/TP3/SL hits, closed signals with results, positions open overnight with the open-risk line, 30-day stats; on a day without signals: "No setup met our entry rules today — we only trade when the odds are on our side." | 11:00 PM IST | yes |
 | Member rules (pinned) | when you press *Post & pin rules* in the admin console | yes |
 
@@ -220,9 +232,9 @@ they were tuned on. Instead:
 
   | Measure | Watch | Beyond testing |
   |---|---|---|
-  | Published book below its peak (at 0.5% per signal) | 6% (8 times in 2022–26) | 10.7% (the worst in testing) |
+  | Published book below its peak (at 0.5% per signal) | 8% (6 times in 2022–26) | 17.2% (the worst in testing) |
   | A strategy's last 30 signals | win rate under 70% (about twice a year) | under 55% (worst stretch 57%) |
-  | Signals before TP1 in one direction | 12 (2–3 days a year) | — |
+  | Signals before TP1 in one direction | 14 (about 4 days a year) | — |
 
   The *Risk guard* card in the admin console shows the same measures. Thresholds: `WATCH_*`.
 - **Pause all new signals.** *Admin → Risk guard → Pause all new signals*, or `/pause` from an
