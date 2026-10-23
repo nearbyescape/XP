@@ -102,7 +102,7 @@ async def test_risk_watch_alerts_once_and_when_back_to_normal(guarded):
         assert await review_risk(s, settings, svc) == ["drawdown"]  # back to normal
         texts = await alerts(s)
         assert len(texts) == 2
-        assert "risk.drawdown" in texts[0] and "6.3% below their peak" in texts[0] and "10.2%" in texts[0]
+        assert "risk.drawdown" in texts[0] and "6.3% below their peak" in texts[0] and "10.7%" in texts[0]
         assert "risk.normal" in texts[1] and "Fall from peak back to normal" in texts[1]
 
         # a strategy's last 30 signals: 20 won

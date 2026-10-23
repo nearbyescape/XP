@@ -126,7 +126,7 @@ What gets sent to the channel (nothing else):
 | New signal: symbol and side, setup, entry, stop loss, TP1 / TP2 / TP3 with the share closed at each, "after TP1 move the stop to entry", entry window (15 min), "Open signal" button. When 10 or more published signals are before TP1 (this one included), one extra line: "⚠️ High open risk … keep your total under 5%" | at a 4H close in the session | yes |
 | TP1 / TP2 hit: reply to the signal with the price and the share closed | as it happens | yes in the session, silent at night |
 | Signal closed (TP3, SL, stop at entry, time limit): reply with the result | as it happens | yes in the session, silent at night |
-| Setup forming: "Our AI model is close to a signal after the 01:30 PM check, leaning SHORT · not a signal yet, please don't enter early" and the checks left today. Only when strategy C's best score is within `WATCH_SCORE_MARGIN` (0.005) of its threshold at one of the day's first two checks, nothing has been published that day and C is live; at most once a day. In 2022-26 testing: 1.0 a week, a signal followed later that day 69% of the time (39% on comparable days) and went the way it leaned 77% of the time. Turn off with `TELEGRAM_WATCH_MESSAGES=false` | 09:30 or 01:30 PM IST | silent |
+| Setup forming: "Our AI model is close to a signal after the 01:30 PM check, leaning SHORT · not a signal yet, please don't enter early" and the checks left today. Only when strategy C's best score is within `WATCH_SCORE_MARGIN` (0.005) of its threshold at one of the day's first two checks, nothing has been published that day and C is live; at most once a day. In 2022-26 testing: 1.1 a week, a signal followed later that day 67% of the time (40% on comparable days) and went the way it leaned 77% of the time. Turn off with `TELEGRAM_WATCH_MESSAGES=false` | 09:30 or 01:30 PM IST | silent |
 | Session end: signals of the day, TP1/TP2/TP3/SL hits, closed signals with results, positions open overnight with the open-risk line, 30-day stats; on a day without signals: "No setup met our entry rules today — we only trade when the odds are on our side." | 11:00 PM IST | yes |
 | Member rules (pinned) | when you press *Post & pin rules* in the admin console | yes |
 
@@ -220,8 +220,8 @@ they were tuned on. Instead:
 
   | Measure | Watch | Beyond testing |
   |---|---|---|
-  | Published book below its peak (at 0.5% per signal) | 6% (6 times in 2022–26) | 10.2% (the worst in testing) |
-  | A strategy's last 30 signals | win rate under 70% (1–2 times a year) | under 50% (worst stretch 53%) |
+  | Published book below its peak (at 0.5% per signal) | 6% (8 times in 2022–26) | 10.7% (the worst in testing) |
+  | A strategy's last 30 signals | win rate under 70% (about twice a year) | under 55% (worst stretch 57%) |
   | Signals before TP1 in one direction | 12 (2–3 days a year) | — |
 
   The *Risk guard* card in the admin console shows the same measures. Thresholds: `WATCH_*`.

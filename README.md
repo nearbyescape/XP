@@ -7,7 +7,7 @@ validated out-of-sample on 2017–2026 Binance data, and track every signal to i
 |---|---|---|
 | A | **Regime Pullback** `RGP-4H`: RSI(2) washout inside a coin + BTC trend | 1,800 signals · 90.5% win rate · PF 1.30 |
 | B | **Sweep Reversal** `RSR-4H`: failed breakdown/breakout of the 4-day range | 947 signals · 88.3% · PF 1.47 |
-| C | **ML-Ranked** `MLR-4H`: LightGBM, top 5% confidence (live: ~6% since Oct 2026), retrained quarterly | 3,240 signals · 88.7% · PF 1.52 |
+| C | **ML-Ranked** `MLR-4H`: LightGBM, top 5% confidence (live: ~7% since Oct 2026), retrained quarterly | 3,240 signals · 88.7% · PF 1.52 |
 | | **Book A + B + C** | 5,829 signals · 89.1% · PF 1.42 · +0.33% net per signal |
 
 Every signal is published with three targets: **TP1 / TP2 / TP3 at 0.5 / 1.0 / 1.5 × ATR**, closing 50 / 30 / 20%

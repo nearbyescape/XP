@@ -34,9 +34,9 @@ NEW10 = ["ZECUSDT", "NEARUSDT", "BCHUSDT", "FILUSDT", "AAVEUSDT",
 UNIVERSES = {"10": SYMBOLS, "15": SYMBOLS + NEW10[:5], "20": SYMBOLS + NEW10}  # 15: the top 5 of the same ranking
 COST = dict(entry=0.0007, tp=0.0002, exit=0.0008)  # "pro" cost model (see run_research.py)
 # Production threshold: the 95th percentile of the last year's in-sample scores, lowered this share of the
-# way toward the 90th (Oct 2026: ~10% more signals for about the same profit; docs/crypto-signal-strategy-
+# way toward the 90th (Oct 2026: ~15% more signals for about the same profit; docs/crypto-signal-strategy-
 # research.md §7). The walk-forward columns thr_cal950 / thr_cal900 bound it.
-THRESHOLD_STEP = 0.25
+THRESHOLD_STEP = 0.375
 CAL_QUANTILES = (0.90, 0.95, 0.975)
 
 
